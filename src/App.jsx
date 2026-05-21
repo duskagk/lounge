@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import './App.css'
 import TerminalView from './components/TerminalView'
 import SessionSidebar from './components/SessionSidebar'
@@ -7,13 +7,38 @@ function App() {
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [profiles, setProfiles] = useState([])
 
-  const addSession = (session) => {
-    const id = `session-${Date.now()}`
+  const addSession = useCallback((session) => {
+    const id = `session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     const newSession = { ...session, id }
     setSessions(prev => [...prev, newSession])
     setActiveId(id)
-  }
+  }, [])
+
+  const refreshProfiles = useCallback(() => {
+    window.electronAPI?.getProfiles().then(setProfiles)
+  }, [])
+
+  // 앱 시작: 프로필 로드 + 자동 연결
+  useEffect(() => {
+    if (!window.electronAPI) return
+    window.electronAPI.getProfiles().then(list => {
+      setProfiles(list)
+      // 자동 연결 프로필 순차 실행 (ID 충돌 방지)
+      list.filter(p => p.autoConnect).forEach((p, i) => {
+        setTimeout(() => addSession({
+          type:       p.type,
+          label:      p.name,
+          host:       p.host,
+          port:       p.port,
+          username:   p.username,
+          password:   p.password,
+          privateKey: p.privateKey,
+        }), i * 100)
+      })
+    })
+  }, [addSession])
 
   const removeSession = (id) => {
     setSessions(prev => prev.filter(s => s.id !== id))
@@ -26,7 +51,7 @@ function App() {
 
   return (
     <div className="app">
-      {/* 타이틀바 - 드래그 가능 영역 */}
+      {/* 타이틀바 */}
       <div className="titlebar">
         <span className="titlebar-logo">&gt;_ wterm</span>
         <div className="titlebar-tabs">
@@ -49,8 +74,10 @@ function App() {
         {/* 사이드바 */}
         {sidebarOpen && (
           <SessionSidebar
+            profiles={profiles}
             onConnect={addSession}
             onClose={() => setSidebarOpen(false)}
+            onRefresh={refreshProfiles}
           />
         )}
 

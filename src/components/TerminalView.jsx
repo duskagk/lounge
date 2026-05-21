@@ -57,6 +57,16 @@ export default function TerminalView({ session, active, onConnected }) {
       termRef.current = term
       fitRef.current  = fitAddon
 
+      // 초기화 직후 컨테이너 크기에 맞게 fit (이걸 안 하면 기본 80×24로 고정됨)
+      requestAnimationFrame(() => {
+        if (!fitRef.current) return
+        fitRef.current.fit()
+        const api = window.electronAPI
+        if (!api) return
+        if (session.type === 'local') api.localResize(session.id, term.cols, term.rows)
+        else if (session.type === 'ssh') api.sshResize(session.id, term.cols, term.rows)
+      })
+
       // ── 입력 처리 ──────────────────────────────────────────────────────────
       term.onData((data) => {
         if (composingRef.current) return
@@ -79,7 +89,7 @@ export default function TerminalView({ session, active, onConnected }) {
 
       // termRef.current === term: 이 인스턴스가 여전히 살아있는지 확인
       if (session.type === 'local') {
-        api.localConnect(session.id).then((res) => {
+        api.localConnect(session.id, session.cwd || '').then((res) => {
           if (termRef.current !== term) return
           if (res.ok) onConnectedRef.current?.()
         }).catch((err) => {
@@ -106,7 +116,7 @@ export default function TerminalView({ session, active, onConnected }) {
         api.sshConnect({
           id: session.id, host: session.host, port: session.port,
           username: session.username, password: session.password,
-          privateKey: session.privateKey,
+          privateKey: session.privateKey, keyPath: session.keyPath,
         }).then((res) => {
           if (termRef.current !== term) return
           if (res.ok) { onConnectedRef.current?.(); term.clear() }
