@@ -1,48 +1,48 @@
 # >_ Lounge
 
-> Terminal session manager with SSH, local shells, and AI agent integration.
+> A terminal session manager for SSH servers, local shells, and AI agent workflows.
 
-Lounge는 단순한 터미널 에뮬레이터가 아닙니다.  
-SSH 서버, 로컬 셸, AI 에이전트를 하나의 공간에서 관리하는 **터미널 세션 매니저**입니다.
+Lounge is not just a terminal emulator.  
+It's a persistent workspace where your servers, projects, and agents are always ready to connect.
 
-공항 라운지처럼 — 에이전트들이 대기하고, 연결이 준비되며, 작업이 시작되는 곳.
+Like an airport lounge — where agents wait, connections stay warm, and work begins the moment you arrive.
 
 <br />
 
 ## Features
 
-### 세션 관리
-- **프로필 저장** — SSH 서버 및 로컬 터미널을 이름과 함께 저장
-- **자동 연결** — 앱 시작 시 지정한 세션을 자동으로 열기
-- **멀티탭** — 여러 세션을 탭으로 동시에 관리
-- **영구 저장** — SQLite 기반으로 재시작해도 프로필 유지
+### Session Management
+- **Saved profiles** — Store SSH servers and local terminals by name
+- **Auto-connect** — Open designated sessions automatically on startup
+- **Collapsible sidebar** — Three states: expanded, icons-only, hidden
+- **Persistent storage** — SQLite-backed profiles survive restarts
 
 ### SSH
-- 비밀번호 / 개인 키 / 키 파일 경로 인증 지원
-- `keyboard-interactive` 인증 자동 처리 (Ubuntu 등)
-- 연결 프로필 저장 및 즉시 연결
+- Password, private key, and key file path authentication
+- Automatic `keyboard-interactive` handling (Ubuntu, Debian, etc.)
+- Save and instantly reconnect to any server
 
-### 로컬 터미널
-- 시작 디렉토리 지정 (프로젝트별 터미널 저장)
-- 폴더 탐색 다이얼로그
+### Local Terminal
+- Set a start directory per profile (one terminal per project)
+- Folder browse dialog for quick path selection
 
-### 편의 기능
-- `Ctrl+C` — 텍스트 선택 시 복사, 없으면 SIGINT
-- `Ctrl+V` / 우클릭 — 붙여넣기
-- 장시간 작업 완료 시 데스크탑 알림
-- 한글 IME 지원
+### Quality of Life
+- `Ctrl+C` — copies selected text; sends SIGINT when nothing is selected
+- `Ctrl+V` / right-click — paste from clipboard
+- Desktop notification when a long-running command finishes (> 5s)
+- CJK IME input support
 
 <br />
 
 ## Stack
 
-| | |
+| Layer | Technology |
 |---|---|
 | Shell | Electron |
 | UI | React + Vite |
 | Terminal | xterm.js |
 | SSH | ssh2 |
-| PTY | node-pty |
+| PTY | node-pty (ConPTY) |
 | DB | better-sqlite3 |
 
 <br />
@@ -50,27 +50,23 @@ SSH 서버, 로컬 셸, AI 에이전트를 하나의 공간에서 관리하는 *
 ## Getting Started
 
 ```bash
-# 의존성 설치
 npm install
-
-# 개발 모드 실행
 npm run dev
+```
 
-# 빌드
+> **Windows recommended** — uses node-pty's ConPTY backend for best compatibility.
+
+### Building
+
+```bash
+# Requires Windows Developer Mode enabled (for symlink support)
+set CSC_IDENTITY_AUTO_DISCOVERY=false
 npm run dist
 ```
 
-> **Windows 환경 권장** — node-pty의 ConPTY를 활용합니다.
-
-<br />
-
-## Roadmap
-
-- [ ] 커맨드 히스토리 북마크 / 매크로
-- [ ] AI / MCP 에이전트 연동
-- [ ] VSCode / IntelliJ 익스텐션
-- [ ] 터미널 출력 렌더링 (Mermaid 다이어그램 등)
-- [ ] 원격 접속 지원
+Outputs to `release/`:
+- `Lounge Setup x.x.x.exe` — NSIS installer
+- `Lounge x.x.x.exe` — portable executable
 
 <br />
 

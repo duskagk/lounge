@@ -30,13 +30,14 @@ body {
   overflow: hidden;
 }
 
-/* ── 타이틀바: 드래그 영역 + 로고만 ──────────── */
+/* ── 타이틀바 ──────────────────────────────────── */
 .titlebar {
   display: flex;
   align-items: center;
+  gap: 8px;
   height: 36px;
   width: 100%;
-  padding: 0 16px;
+  padding: 0 12px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -52,16 +53,42 @@ body {
   letter-spacing: 1px;
 }
 
+.btn-sidebar-toggle {
+  -webkit-app-region: no-drag;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+.btn-sidebar-toggle:hover { color: var(--text); background: var(--surface2); }
+
 /* ── 좌측 세션 탭 사이드바 ─────────────────────── */
 .tab-sidebar {
-  width: 200px;
   flex-shrink: 0;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  transition: width 0.2s ease;
 }
+/* expanded: 200px, labels visible */
+.tab-sidebar--expanded { width: 200px; }
+/* icons: 48px, dots + icons only */
+.tab-sidebar--icons    { width: 48px; }
+/* hidden: 0, invisible */
+.tab-sidebar--hidden   { width: 0; border-right: none; }
 
 .tab-sidebar-sessions {
   flex: 1;
@@ -95,6 +122,15 @@ body {
 .tab-item.active {
   background: var(--surface2);
   border-color: var(--border);
+}
+/* icons 모드: 도트만 중앙 정렬 */
+.tab-sidebar--icons .tab-item {
+  justify-content: center;
+  padding: 10px 0;
+  margin: 2px 6px;
+}
+.tab-sidebar--icons .tab-dot {
+  width: 8px; height: 8px;
 }
 
 .tab-dot {
@@ -165,6 +201,13 @@ body {
   font-size: 16px;
   line-height: 1;
   font-weight: 300;
+  flex-shrink: 0;
+}
+
+/* icons 모드: + 버튼도 중앙 아이콘만 */
+.tab-sidebar--icons .btn-new-session {
+  justify-content: center;
+  padding: 9px 0;
 }
 
 /* ── 메인 영역 ─────────────────────────────────── */
