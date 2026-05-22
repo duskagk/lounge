@@ -124,11 +124,11 @@ export default function TerminalView({ session, active, onConnected }) {
           if (res.ok) onConnectedRef.current?.()
         }).catch((err) => {
           if (termRef.current !== term) return
-          term.writeln(`\r\n\x1b[31m[연결 실패] ${err}\x1b[0m\r\n`)
+          term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m\r\n`)
         })
 
         const onData  = (data) => { if (termRef.current === term) { term.write(data); checkNotify(data) } }
-        const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[세션 종료]\x1b[0m') }
+        const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[session closed]\x1b[0m') }
         api.onLocalData(session.id, onData)
         api.onLocalClose(session.id, onClose)
 
@@ -142,7 +142,7 @@ export default function TerminalView({ session, active, onConnected }) {
         }
 
       } else if (session.type === 'ssh') {
-        term.writeln('\x1b[33m연결 중...\x1b[0m')
+        term.writeln('\x1b[33mConnecting...\x1b[0m')
         api.sshConnect({
           id: session.id, host: session.host, port: session.port,
           username: session.username, password: session.password,
@@ -152,11 +152,11 @@ export default function TerminalView({ session, active, onConnected }) {
           if (res.ok) { onConnectedRef.current?.(); term.clear() }
         }).catch((err) => {
           if (termRef.current !== term) return
-          term.writeln(`\r\n\x1b[31m[연결 실패] ${err}\x1b[0m\r\n`)
+          term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m\r\n`)
         })
 
         const onData  = (data) => { if (termRef.current === term) { term.write(data); checkNotify(data) } }
-        const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[연결 종료]\x1b[0m') }
+        const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[disconnected]\x1b[0m') }
         api.onSshData(session.id, onData)
         api.onSshClose(session.id, onClose)
 
@@ -180,7 +180,7 @@ export default function TerminalView({ session, active, onConnected }) {
         if (startTimeRef.current && /[$#>]\s*$/.test(data)) {
           const elapsed = Date.now() - startTimeRef.current
           if (elapsed > NOTIFY_THRESHOLD_MS) {
-            api?.notify('Lounge', `작업 완료 (${Math.round(elapsed / 1000)}초 소요)`)
+            api?.notify('Lounge', `Task completed (${Math.round(elapsed / 1000)}s)`)
           }
           startTimeRef.current = null
         }

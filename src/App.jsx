@@ -6,7 +6,7 @@ import SessionSidebar from './components/SessionSidebar'
 function App() {
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [profiles, setProfiles] = useState([])
 
   const addSession = useCallback((session) => {
@@ -51,31 +51,51 @@ function App() {
 
   return (
     <div className="app">
-      {/* 타이틀바 */}
+      {/* 타이틀바: 드래그 영역 + 로고만 */}
       <div className="titlebar">
         <span className="titlebar-logo">&gt;_ lounge</span>
-        <div className="titlebar-tabs">
-          {sessions.map(s => (
-            <div
-              key={s.id}
-              className={`tab ${s.id === activeId ? 'active' : ''}`}
-              onClick={() => setActiveId(s.id)}
-            >
-              <span className={`tab-dot ${s.connected ? 'connected' : ''}`} />
-              <span className="tab-label">{s.label}</span>
-              <span className="tab-close" onClick={e => { e.stopPropagation(); removeSession(s.id) }}>×</span>
-            </div>
-          ))}
-          <button className="btn-new-tab" onClick={() => setSidebarOpen(true)}>+</button>
-        </div>
       </div>
 
       <div className="main">
-        {/* 사이드바 */}
+        {/* 좌측 세션 탭 패널 */}
+        <div className="tab-sidebar">
+          <div className="tab-sidebar-sessions">
+            {sessions.length === 0 ? (
+              <p className="tab-sidebar-empty">No open sessions</p>
+            ) : (
+              sessions.map(s => (
+                <div
+                  key={s.id}
+                  className={`tab-item ${s.id === activeId ? 'active' : ''}`}
+                  onClick={() => setActiveId(s.id)}
+                  title={s.label}
+                >
+                  <span className={`tab-dot ${s.connected ? 'connected' : ''}`} />
+                  <span className="tab-item-label">{s.label}</span>
+                  <span
+                    className="tab-item-close"
+                    onClick={e => { e.stopPropagation(); removeSession(s.id) }}
+                  >×</span>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="tab-sidebar-footer">
+            <button
+              className={`btn-new-session ${sidebarOpen ? 'active' : ''}`}
+              onClick={() => setSidebarOpen(v => !v)}
+            >
+              <span className="btn-new-session-icon">{sidebarOpen ? '−' : '+'}</span>
+              New Session
+            </button>
+          </div>
+        </div>
+
+        {/* 연결 패널 (토글) */}
         {sidebarOpen && (
           <SessionSidebar
             profiles={profiles}
-            onConnect={addSession}
+            onConnect={(session) => { addSession(session); setSidebarOpen(false) }}
             onClose={() => setSidebarOpen(false)}
             onRefresh={refreshProfiles}
           />
@@ -86,9 +106,9 @@ function App() {
           {sessions.length === 0 ? (
             <div className="splash">
               <div className="splash-logo">&gt;_</div>
-              <p>세션을 추가하고 작업을 시작하세요</p>
+              <p>Open a session to get started</p>
               <div className="splash-actions">
-                <button className="btn-primary" onClick={() => setSidebarOpen(true)}>터미널 열기</button>
+                <button className="btn-primary" onClick={() => setSidebarOpen(true)}>New Session</button>
               </div>
             </div>
           ) : (
