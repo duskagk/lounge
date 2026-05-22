@@ -53,7 +53,7 @@ function App() {
     <div className="app">
       {/* 타이틀바 */}
       <div className="titlebar">
-        <span className="titlebar-logo">&gt;_ wterm</span>
+        <span className="titlebar-logo">&gt;_ lounge</span>
         <div className="titlebar-tabs">
           {sessions.map(s => (
             <div
@@ -86,7 +86,7 @@ function App() {
           {sessions.length === 0 ? (
             <div className="splash">
               <div className="splash-logo">&gt;_</div>
-              <p>새 터미널을 열어 시작하세요</p>
+              <p>세션을 추가하고 작업을 시작하세요</p>
               <div className="splash-actions">
                 <button className="btn-primary" onClick={() => setSidebarOpen(true)}>터미널 열기</button>
               </div>

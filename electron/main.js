@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Notification, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, Notification, dialog, clipboard } = require('electron')
 const fs = require('fs')
 const path = require('path')
 const { Client } = require('ssh2')
@@ -234,6 +234,10 @@ ipcMain.handle('profiles:delete', (_, id) => {
   db.prepare('DELETE FROM profiles WHERE id = ?').run(id)
   return { ok: true }
 })
+
+// ── 클립보드 ──────────────────────────────────────────────────────────────────
+ipcMain.handle('clipboard:read',  ()         => clipboard.readText())
+ipcMain.on(    'clipboard:write', (_, text)  => clipboard.writeText(text))
 
 // ── 파일 탐색 다이얼로그 ──────────────────────────────────────────────────────
 ipcMain.handle('dialog:openFile', async () => {

@@ -1,7 +1,7 @@
 {
-  "name": "wterm",
+  "name": "lounge",
   "version": "0.1.0",
-  "description": "Developer terminal with Korean IME, SSH management, AI/MCP",
+  "description": "Terminal session manager with SSH, AI agents, and developer tools",
   "main": "electron/main.js",
   "scripts": {
     "dev:vite": "vite",
@@ -11,8 +11,8 @@
     "dist": "npm run build && electron-builder"
   },
   "build": {
-    "appId": "com.wterm.app",
-    "productName": "wterm",
+    "appId": "com.lounge.app",
+    "productName": "Lounge",
     "directories": {
       "output": "release"
     },

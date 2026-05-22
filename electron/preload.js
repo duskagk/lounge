@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   offLocalData:    (id, cb)         => ipcRenderer.removeListener(`local:data:${id}`, cb),
   offLocalClose:   (id, cb)         => ipcRenderer.removeListener(`local:close:${id}`, cb),
 
+  // 클립보드
+  readClipboard:  ()     => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text) => ipcRenderer.send('clipboard:write', text),
+
   // 파일/폴더 탐색
   browseFile:   () => ipcRenderer.invoke('dialog:openFile'),
   browseFolder: () => ipcRenderer.invoke('dialog:openFolder'),

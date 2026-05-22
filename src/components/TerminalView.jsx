@@ -67,6 +67,42 @@ export default function TerminalView({ session, active, onConnected }) {
         else if (session.type === 'ssh') api.sshResize(session.id, term.cols, term.rows)
       })
 
+      // ── 복사 / 붙여넣기 ───────────────────────────────────────────────────
+      term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== 'keydown') return true
+
+        // Ctrl+V → 붙여넣기
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyV') {
+          api.readClipboard().then(text => { if (text) sendInput(text) })
+          return false
+        }
+
+        // Ctrl+C → 선택 텍스트 있으면 복사, 없으면 SIGINT 그대로 전달
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyC') {
+          const sel = term.getSelection()
+          if (sel) {
+            api.writeClipboard(sel)
+            term.clearSelection()
+            return false
+          }
+        }
+
+        // Ctrl+Shift+C → 명시적 복사
+        if (e.ctrlKey && e.shiftKey && e.code === 'KeyC') {
+          const sel = term.getSelection()
+          if (sel) api.writeClipboard(sel)
+          return false
+        }
+
+        return true
+      })
+
+      // 우클릭 → 붙여넣기 (Windows Terminal 방식)
+      containerRef.current.addEventListener('contextmenu', (e) => {
+        e.preventDefault()
+        api.readClipboard().then(text => { if (text) sendInput(text) })
+      })
+
       // ── 입력 처리 ──────────────────────────────────────────────────────────
       term.onData((data) => {
         if (composingRef.current) return
@@ -79,12 +115,6 @@ export default function TerminalView({ session, active, onConnected }) {
       textarea.addEventListener('compositionend', (e) => {
         composingRef.current = false
         if (e.data) sendInput(e.data)
-      })
-      textarea.addEventListener('paste', (e) => {
-        e.preventDefault()
-        e.stopPropagation()
-        const text = e.clipboardData.getData('text/plain')
-        if (text) sendInput(text)
       })
 
       // termRef.current === term: 이 인스턴스가 여전히 살아있는지 확인
@@ -150,7 +180,7 @@ export default function TerminalView({ session, active, onConnected }) {
         if (startTimeRef.current && /[$#>]\s*$/.test(data)) {
           const elapsed = Date.now() - startTimeRef.current
           if (elapsed > NOTIFY_THRESHOLD_MS) {
-            api?.notify('wterm', `작업 완료 (${Math.round(elapsed / 1000)}초 소요)`)
+            api?.notify('Lounge', `작업 완료 (${Math.round(elapsed / 1000)}초 소요)`)
           }
           startTimeRef.current = null
         }
