@@ -40,4 +40,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 설정
   getSettings:  ()       => ipcRenderer.invoke('settings:get'),
   saveSettings: (s)      => ipcRenderer.invoke('settings:set', s),
+
+  // 터미널 로그
+  logAppend:       (data) => ipcRenderer.invoke('log:append', data),
+  logSearch:       (opts) => ipcRenderer.invoke('log:search', opts),
+  logPurge:        (opts) => ipcRenderer.invoke('log:purge', opts),
+  logClearSession: (sessionId) => ipcRenderer.invoke('log:clear-session', { sessionId }),
+  logCount:        (opts) => ipcRenderer.invoke('log:count', opts),
 })

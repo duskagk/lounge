@@ -3,6 +3,7 @@ import './App.css'
 import TerminalView from './components/TerminalView'
 import SessionSidebar from './components/SessionSidebar'
 import FontSettingsPanel from './components/FontSettingsPanel'
+import LogSearchPanel from './components/LogSearchPanel'
 
 const SIDEBAR_STATES = ['expanded', 'icons', 'hidden']
 const HANDLE_PX = 4
@@ -13,6 +14,14 @@ const HANDLE_PX = 4
 
 function genId() {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+}
+
+// 재시작해도 일관성 있는 로그 검색 키
+// 프로필 기반 → profile:<id>, 임시 SSH → ssh:host:port:user, 임시 로컬 → local:cwd
+function getStableLogId(session) {
+  if (session.profileId) return `profile:${session.profileId}`
+  if (session.type === 'ssh') return `ssh:${session.host}:${session.port || 22}:${session.username}`
+  return `local:${session.cwd || 'home'}`
 }
 
 function getFirstLeafId(node) {
@@ -168,12 +177,15 @@ function App() {
   // Per-tab focused pane: { [primaryTabId]: sessionId }  (defaults to primary tab's own id)
   const [tabActivePaneId,   setTabActivePaneId]   = useState({})
 
-  const [panelOpen,     setPanelOpen]     = useState(false)
-  const [profiles,      setProfiles]      = useState([])
-  const [tabState,      setTabState]      = useState('expanded')
-  const [fontFamily,    setFontFamily]    = useState('JetBrains Mono')
-  const [fontSize,      setFontSize]      = useState(14)
-  const [fontPanelOpen, setFontPanelOpen] = useState(false)
+  const [panelOpen,       setPanelOpen]       = useState(false)
+  const [profiles,        setProfiles]        = useState([])
+  const [tabState,        setTabState]        = useState('expanded')
+  const [fontFamily,      setFontFamily]      = useState('JetBrains Mono')
+  const [fontSize,        setFontSize]        = useState(14)
+  const [fontPanelOpen,   setFontPanelOpen]   = useState(false)
+  // 로그 캡처: 세션별 on/off { [sessionId]: boolean }
+  const [sessionLogging,  setSessionLogging]  = useState({})
+  const [logSearchOpen,   setLogSearchOpen]   = useState(false)
 
   // Refs (stale-closure prevention)
   const activeTabIdRef     = useRef(activeTabId)
@@ -192,8 +204,9 @@ function App() {
 
   // addSession: creates a new PRIMARY session (= new sidebar tab)
   const addSession = useCallback((session) => {
-    const id = genId()
-    setAllSessions(prev => [...prev, { ...session, id, primaryTabId: null, connected: false }])
+    const id    = genId()
+    const logId = getStableLogId(session)  // 재시작 후에도 동일한 stable key
+    setAllSessions(prev => [...prev, { ...session, id, logId, primaryTabId: null, connected: false }])
     setActiveTabId(id)
     // tabSplitTrees[id] is implicitly null (no split)
     // tabActivePaneId[id] is implicitly id (primary pane is focused)
@@ -226,6 +239,7 @@ function App() {
           if (!cancelled) addSession({
             type: p.type, label: p.name, host: p.host, port: p.port,
             username: p.username, password: p.password, privateKey: p.privateKey, cwd: p.cwd,
+            profileId: p.id,
           })
         }, i * 100)
       })
@@ -245,6 +259,7 @@ function App() {
     const newId = genId()
 
     // Sub-pane: clone of the focused pane, owned by this tab (NOT in sidebar)
+    // logId는 원본 패인과 동일하게 상속 (같은 서버에 대한 분리 뷰이므로)
     setAllSessions(prev => [...prev, { ...curPaneSession, id: newId, primaryTabId: curTabId, connected: false }])
 
     // Update this tab's split tree
@@ -299,6 +314,14 @@ function App() {
     }
   }, [])
 
+  // 현재 포커스 페인의 로그 캡처 토글 (ref 사용 — 파생 상태보다 앞에 위치)
+  const toggleLogging = useCallback(() => {
+    const curTabId = activeTabIdRef.current
+    if (!curTabId) return
+    const paneId = tabActivePaneIdRef.current[curTabId] ?? curTabId
+    setSessionLogging(prev => ({ ...prev, [paneId]: !(prev[paneId] ?? false) }))
+  }, [])
+
   const onDragHandle = useCallback((path, ratio) => {
     const curTabId = activeTabIdRef.current
     setTabSplitTrees(prev => ({
@@ -307,12 +330,13 @@ function App() {
     }))
   }, [])
 
-  // Ctrl+Shift+H/V = split; Ctrl+Shift+W = close focused pane (only in split mode)
+  // Ctrl+Shift+H/V = split; Ctrl+Shift+W = close pane; Ctrl+Shift+F = log search
   useEffect(() => {
     const handler = (e) => {
       if (!e.ctrlKey || !e.shiftKey || e.altKey) return
       if (e.code === 'KeyH') { e.preventDefault(); splitActive('h') }
       if (e.code === 'KeyV') { e.preventDefault(); splitActive('v') }
+      if (e.code === 'KeyF') { e.preventDefault(); setLogSearchOpen(v => !v) }
       if (e.code === 'KeyW') {
         e.preventDefault()
         const curTabId = activeTabIdRef.current
@@ -375,6 +399,19 @@ function App() {
           )}
           <div className="titlebar-sep" />
           <button
+            className={`btn-sidebar-toggle log-toggle ${currentActivePaneId && sessionLogging[currentActivePaneId] ? 'recording' : ''}`}
+            onClick={toggleLogging}
+            title={currentActivePaneId && sessionLogging[currentActivePaneId] ? 'Stop logging' : 'Start logging'}
+            disabled={!currentActivePaneId}
+          >●</button>
+          <button
+            className={`btn-sidebar-toggle ${logSearchOpen ? 'active' : ''}`}
+            onClick={() => setLogSearchOpen(v => !v)}
+            title="Search logs (Ctrl+Shift+F)"
+            disabled={!currentActivePaneId}
+          >⌕</button>
+          <div className="titlebar-sep" />
+          <button
             className={`btn-sidebar-toggle ${fontPanelOpen ? 'active' : ''}`}
             onClick={() => setFontPanelOpen(v => !v)}
             title="Font settings"
@@ -386,6 +423,14 @@ function App() {
         <FontSettingsPanel
           fontFamily={fontFamily} fontSize={fontSize}
           onChange={handleFontChange} onClose={() => setFontPanelOpen(false)}
+        />
+      )}
+
+      {logSearchOpen && (
+        <LogSearchPanel
+          logId={allSessions.find(s => s.id === currentActivePaneId)?.logId ?? currentActivePaneId}
+          sessionLabel={allSessions.find(s => s.id === currentActivePaneId)?.label ?? ''}
+          onClose={() => setLogSearchOpen(false)}
         />
       )}
 
@@ -474,10 +519,12 @@ function App() {
                   >
                     <TerminalView
                       session={s}
+                      logId={s.logId ?? s.id}
                       active={isFocused}
                       visible={belongsToActive ? inLayout : false}
                       fontFamily={fontFamily}
                       fontSize={fontSize}
+                      logEnabled={sessionLogging[s.id] ?? false}
                       onConnected={() =>
                         setAllSessions(prev => prev.map(p => p.id === s.id ? { ...p, connected: true } : p))
                       }

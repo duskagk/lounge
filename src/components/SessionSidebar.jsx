@@ -96,6 +96,7 @@ export default function SessionSidebar({ profiles, onConnect, onClose, onRefresh
     password:   p.password,
     privateKey: p.privateKey,
     cwd:        p.cwd,
+    profileId:  p.id,   // 재시작 후에도 같은 세션 히스토리를 찾을 수 있는 stable key
   })
 
   const handleDelete = async (e, id) => {

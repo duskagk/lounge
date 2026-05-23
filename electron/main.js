@@ -36,7 +36,34 @@ function initDB() {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS terminal_logs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT    NOT NULL,
+      label      TEXT    DEFAULT '',
+      timestamp  INTEGER NOT NULL,
+      command    TEXT    DEFAULT '',
+      output     TEXT    DEFAULT '',
+      mode       TEXT    DEFAULT 'command'
+    );
   `)
+  // FTS5 가상 테이블 + 동기화 트리거 (FTS5 미지원 환경 대비 try/catch)
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS terminal_logs_fts USING fts5(
+        command, output,
+        content=terminal_logs,
+        content_rowid=id
+      );
+      CREATE TRIGGER IF NOT EXISTS tl_ai AFTER INSERT ON terminal_logs BEGIN
+        INSERT INTO terminal_logs_fts(rowid, command, output)
+        VALUES (new.id, new.command, new.output);
+      END;
+      CREATE TRIGGER IF NOT EXISTS tl_ad AFTER DELETE ON terminal_logs BEGIN
+        INSERT INTO terminal_logs_fts(terminal_logs_fts, rowid, command, output)
+        VALUES ('delete', old.id, old.command, old.output);
+      END;
+    `)
+  } catch (_) {}
   // 기존 DB 마이그레이션
   try { db.exec(`ALTER TABLE profiles ADD COLUMN cwd      TEXT DEFAULT ''`) } catch (_) {}
   try { db.exec(`ALTER TABLE profiles ADD COLUMN key_path TEXT DEFAULT ''`) } catch (_) {}
@@ -266,14 +293,15 @@ ipcMain.handle('dialog:openFolder', async () => {
 })
 
 // ── 설정 (SQLite) ─────────────────────────────────────────────────────────────
-const SETTING_DEFAULTS = { fontFamily: 'JetBrains Mono', fontSize: '14' }
+const SETTING_DEFAULTS = { fontFamily: 'JetBrains Mono', fontSize: '14', logRetentionDays: '30' }
 
 ipcMain.handle('settings:get', () => {
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const map  = Object.fromEntries(rows.map(r => [r.key, r.value]))
   return {
-    fontFamily: map.fontFamily || SETTING_DEFAULTS.fontFamily,
-    fontSize:   parseInt(map.fontSize || SETTING_DEFAULTS.fontSize, 10),
+    fontFamily:       map.fontFamily       || SETTING_DEFAULTS.fontFamily,
+    fontSize:         parseInt(map.fontSize         || SETTING_DEFAULTS.fontSize,         10),
+    logRetentionDays: parseInt(map.logRetentionDays || SETTING_DEFAULTS.logRetentionDays, 10),
   }
 })
 
@@ -283,6 +311,94 @@ ipcMain.handle('settings:set', (_, settings) => {
   )
   for (const [key, value] of Object.entries(settings)) stmt.run(key, String(value))
   return { ok: true }
+})
+
+// ── 터미널 로그 (SQLite + FTS5) ───────────────────────────────────────────────
+const OUTPUT_LIMIT = 500_000   // 레코드당 최대 500KB
+
+// FTS5 쿼리 안전 변환: 특수문자 제거 후 각 단어를 prefix 검색으로
+function buildFtsQuery(input) {
+  const words = input.trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return null
+  return words.map(w => w.replace(/['"*()^-]/g, '') + '*').filter(Boolean).join(' ')
+}
+
+ipcMain.handle('log:append', (_, { sessionId, label, command, output, mode, timestamp }) => {
+  try {
+    db.prepare(`
+      INSERT INTO terminal_logs (session_id, label, timestamp, command, output, mode)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      sessionId,
+      label    || '',
+      timestamp || Date.now(),
+      (command || '').trim(),
+      (output  || '').slice(0, OUTPUT_LIMIT),
+      mode     || 'command'
+    )
+    console.log(`[log:append] saved cmd="${(command||'').trim().slice(0,40)}" sid=${sessionId?.slice(-8)}`)
+  } catch (err) {
+    console.error('[log:append] INSERT failed:', err.message)
+  }
+  return { ok: true }
+})
+
+// 진단용: 세션별 레코드 수 반환
+ipcMain.handle('log:count', (_, { sessionId } = {}) => {
+  try {
+    if (sessionId) {
+      return db.prepare('SELECT COUNT(*) as n FROM terminal_logs WHERE session_id = ?').get(sessionId)?.n ?? 0
+    }
+    return db.prepare('SELECT COUNT(*) as n FROM terminal_logs').get()?.n ?? 0
+  } catch (e) {
+    console.error('[log:count]', e.message)
+    return -1
+  }
+})
+
+ipcMain.handle('log:search', (_, { query, sessionId, limit = 100 }) => {
+  if (!query || !query.trim()) return []
+  const ftsQuery = buildFtsQuery(query)
+  if (!ftsQuery) return []
+
+  // snippet() 은 대용량 output 전체를 스캔해 느리므로
+  // 앞 600자만 가져와 JS 쪽에서 하이라이팅 처리.
+  // GROUP BY 는 반드시 WHERE 조건이 모두 끝난 뒤에 위치해야 함.
+  try {
+    const base = `
+      SELECT l.id, l.session_id, l.label, l.timestamp, l.command, l.mode,
+             SUBSTR(l.output, 1, 600) AS out_snip
+      FROM   terminal_logs_fts f
+      JOIN   terminal_logs l ON l.id = f.rowid
+      WHERE  terminal_logs_fts MATCH ?`
+
+    return sessionId
+      ? db.prepare(base + ` AND l.session_id = ? GROUP BY l.id ORDER BY l.timestamp DESC LIMIT ?`).all(ftsQuery, sessionId, limit)
+      : db.prepare(base + ` GROUP BY l.id ORDER BY l.timestamp DESC LIMIT ?`).all(ftsQuery, limit)
+  } catch (e) {
+    // FTS5 query 오류 → LIKE 폴백
+    console.warn('[log:search] FTS5 fallback:', e.message)
+    const like = `%${query}%`
+    const base = `
+      SELECT id, session_id, label, timestamp, command, SUBSTR(output, 1, 600) AS out_snip, mode
+      FROM terminal_logs
+      WHERE (command LIKE ? OR output LIKE ?)`
+    return sessionId
+      ? db.prepare(base + ` AND session_id = ? GROUP BY id ORDER BY timestamp DESC LIMIT ?`).all(like, like, sessionId, limit)
+      : db.prepare(base + ` GROUP BY id ORDER BY timestamp DESC LIMIT ?`).all(like, like, limit)
+  }
+})
+
+ipcMain.handle('log:purge', (_, { retentionDays }) => {
+  const days = Math.max(1, retentionDays || 30)
+  const cutoff = Date.now() - days * 86_400_000
+  const r = db.prepare('DELETE FROM terminal_logs WHERE timestamp < ?').run(cutoff)
+  return { deleted: r.changes }
+})
+
+ipcMain.handle('log:clear-session', (_, { sessionId }) => {
+  const r = db.prepare('DELETE FROM terminal_logs WHERE session_id = ?').run(sessionId)
+  return { deleted: r.changes }
 })
 
 // ── 알림 ──────────────────────────────────────────────────────────────────────

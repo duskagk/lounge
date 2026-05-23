@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from 'xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -6,15 +6,36 @@ import 'xterm/css/xterm.css'
 
 const NOTIFY_THRESHOLD_MS = 5000
 
-export default function TerminalView({ session, active, visible, fontFamily, fontSize, onConnected }) {
+// ANSI 이스케이프 코드 제거 (DB 저장 전 정제용)
+function stripAnsi(str) {
+  return str
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')          // CSI sequences
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '') // OSC sequences
+    .replace(/\x1b[()][0-9A-Za-z]/g, '')              // charset sequences
+    .replace(/\x1b[MOPQRZ78=><]/g, '')                // simple escapes
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '') // control chars
+}
+
+export default function TerminalView({ session, logId, active, visible, fontFamily, fontSize, logEnabled = false, onConnected }) {
   const containerRef   = useRef(null)
   const termRef        = useRef(null)
   const fitRef         = useRef(null)
   const startTimeRef   = useRef(null)
   const composingRef   = useRef(false)
-  // onConnected는 매 렌더마다 새 함수로 생성되므로 ref로 안정화
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
+
+  // 로그 캡처 상태
+  const logEnabledRef = useRef(logEnabled)
+  logEnabledRef.current = logEnabled
+  const logStateRef = useRef({
+    pendingCommand: '',   // 현재 입력 중인 명령어
+    lastCommand:    '',   // 직전 Enter로 실행된 명령어 (출력 수집 중)
+    output:         '',   // lastCommand 의 출력 버퍼
+    mode:           'command',
+    startTime:      Date.now(),
+    inAltScreen:    false,
+  })
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -79,6 +100,10 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true
 
+        // Ctrl+Shift+F → 앱 레벨에서 로그 검색 패널을 열도록 전달
+        //   (return false = PTY에 전달하지 않되, 이벤트는 계속 버블링됨)
+        if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyF') return false
+
         // Ctrl+V → 붙여넣기
         if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyV') {
           api.readClipboard().then(text => { if (text) sendInput(text) })
@@ -111,11 +136,65 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
         api.readClipboard().then(text => { if (text) sendInput(text) })
       })
 
+      // ── 로그 캡처 헬퍼 ────────────────────────────────────────────────────
+      // lastCommand + 지금까지 쌓인 output을 DB에 저장하고 그 필드만 초기화.
+      // pendingCommand는 건드리지 않음 (다음 Enter까지 계속 쌓임).
+      // logId: 재시작 후에도 같은 세션 히스토리를 찾는 stable key (App.jsx에서 주입)
+      const stableLogId = logId ?? session.id
+
+      function flushLog(forcedMode) {
+        if (!logEnabledRef.current) {
+          console.log('[lounge:log] flushLog skipped — logging disabled')
+          return
+        }
+        const s = logStateRef.current
+        if (!s.lastCommand && !s.output) {
+          console.log('[lounge:log] flushLog skipped — both empty (cmd=' + JSON.stringify(s.lastCommand) + ')')
+          return
+        }
+        console.log('[lounge:log] flushLog SAVING', { cmd: s.lastCommand, outLen: s.output.length })
+        api?.logAppend({
+          sessionId: stableLogId,
+          label:     session.label || '',
+          command:   s.lastCommand,
+          output:    s.output.slice(0, 500_000),
+          mode:      forcedMode ?? s.mode,
+          timestamp: s.startTime,
+        })
+        s.lastCommand = ''
+        s.output      = ''
+        s.startTime   = Date.now()
+        s.mode        = 'command'
+      }
+
       // ── 입력 처리 ──────────────────────────────────────────────────────────
       term.onData((data) => {
         if (composingRef.current) return
         sendInput(data)
         if (data === '\r') startTimeRef.current = Date.now()
+
+        if (!logEnabledRef.current || logStateRef.current.inAltScreen) return
+
+        if (data === '\r') {
+          // Enter: 직전 lastCommand+output 저장 → 이번 pendingCommand를 lastCommand로 승격
+          flushLog()
+          const ls = logStateRef.current
+          ls.lastCommand    = ls.pendingCommand
+          ls.pendingCommand = ''
+          ls.output         = ''
+          ls.startTime      = Date.now()
+        } else if (data === '\x03') {
+          // Ctrl+C: 현재 lastCommand+output 저장 후 전부 초기화
+          flushLog('stream')
+          const ls = logStateRef.current
+          ls.pendingCommand = ''
+          ls.lastCommand    = ''
+        } else if (data === '\x7f' || data === '\b') {
+          // Backspace
+          logStateRef.current.pendingCommand = logStateRef.current.pendingCommand.slice(0, -1)
+        } else if (data.length === 1 && data >= ' ') {
+          logStateRef.current.pendingCommand += data
+        }
       })
 
       const textarea = term.textarea
@@ -126,6 +205,39 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
       })
 
       // termRef.current === term: 이 인스턴스가 여전히 살아있는지 확인
+      // PTY 출력에서 alternate screen + 출력 수집
+      function handleOutputLog(data) {
+        if (!logEnabledRef.current) return
+        const ls = logStateRef.current
+
+        if (data.includes('\x1b[?1049h')) {
+          // vim, htop 등 전체화면 앱 진입
+          flushLog()
+          ls.inAltScreen = true
+          ls.mode        = 'app'
+          ls.startTime   = Date.now()
+          return
+        }
+        if (data.includes('\x1b[?1049l')) {
+          // 전체화면 앱 종료
+          if (ls.inAltScreen) {
+            api?.logAppend({
+              sessionId: stableLogId, label: session.label || '',
+              command: '[interactive app]', output: '',
+              mode: 'app', timestamp: ls.startTime,
+            })
+            logStateRef.current = {
+              pendingCommand: '', lastCommand: '', output: '', mode: 'command',
+              startTime: Date.now(), inAltScreen: false,
+            }
+          }
+          return
+        }
+        if (!ls.inAltScreen) {
+          ls.output += stripAnsi(data).replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        }
+      }
+
       if (session.type === 'local') {
         api.localConnect(session.id, session.cwd || '').then((res) => {
           if (termRef.current !== term) return
@@ -135,12 +247,16 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
           term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m\r\n`)
         })
 
-        const onData  = (data) => { if (termRef.current === term) { term.write(data); checkNotify(data) } }
+        const onData  = (data) => {
+          if (termRef.current !== term) return
+          term.write(data); checkNotify(data); handleOutputLog(data)
+        }
         const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[session closed]\x1b[0m') }
         api.onLocalData(session.id, onData)
         api.onLocalClose(session.id, onClose)
 
         doCleanup = () => {
+          flushLog()          // 탭 닫힐 때 미완성 레코드 저장
           termRef.current = null
           fitRef.current  = null
           api.offLocalData(session.id, onData)
@@ -163,12 +279,16 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
           term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m\r\n`)
         })
 
-        const onData  = (data) => { if (termRef.current === term) { term.write(data); checkNotify(data) } }
+        const onData  = (data) => {
+          if (termRef.current !== term) return
+          term.write(data); checkNotify(data); handleOutputLog(data)
+        }
         const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[disconnected]\x1b[0m') }
         api.onSshData(session.id, onData)
         api.onSshClose(session.id, onClose)
 
         doCleanup = () => {
+          flushLog()          // 탭 닫힐 때 미완성 레코드 저장
           termRef.current = null
           fitRef.current  = null
           api.offSshData(session.id, onData)
@@ -200,6 +320,22 @@ export default function TerminalView({ session, active, visible, fontFamily, fon
       doCleanup()
     }
   }, [session.id])
+
+  // 로그 꺼질 때 미완성 레코드 flush
+  useEffect(() => {
+    if (logEnabled) return
+    const s = logStateRef.current
+    if (!s.lastCommand && !s.output) return
+    window.electronAPI?.logAppend({
+      sessionId: logId ?? session.id, label: session.label || '',
+      command: s.lastCommand, output: s.output.slice(0, 500_000),
+      mode: s.mode, timestamp: s.startTime,
+    })
+    logStateRef.current = {
+      pendingCommand: '', lastCommand: '', output: '', mode: 'command',
+      startTime: Date.now(), inAltScreen: false,
+    }
+  }, [logEnabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const term = termRef.current
