@@ -1,3 +1,23 @@
+/* ── 번들 폰트 — 모두 public/fonts/ 에 위치 ─────── */
+@font-face { font-family: 'JetBrains Mono';      src: url('/fonts/JetBrainsMono-400.woff2') format('woff2'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'JetBrains Mono';      src: url('/fonts/JetBrainsMono-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'Fira Code';            src: url('/fonts/FiraCode-400.woff2')      format('woff2'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'Fira Code';            src: url('/fonts/FiraCode-700.woff2')      format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'Source Code Pro';      src: url('/fonts/SourceCodePro-400.woff2') format('woff2'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'Source Code Pro';      src: url('/fonts/SourceCodePro-700.woff2') format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'IBM Plex Mono';        src: url('/fonts/IBMPlexMono-400.woff2')   format('woff2'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'IBM Plex Mono';        src: url('/fonts/IBMPlexMono-700.woff2')   format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'Nanum Gothic Coding';  src: url('/fonts/NanumGothicCoding-400.woff2')         format('woff2'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'Nanum Gothic Coding';  src: url('/fonts/NanumGothicCoding-700.woff2')         format('woff2'); font-weight: 700; font-display: block; }
+@font-face { font-family: 'Nanum Gothic Coding';  src: url('/fonts/NanumGothicCoding-Korean-400.woff2')  format('woff2'); font-weight: 400; font-display: block; unicode-range: U+AC00-D7A3, U+1100-11FF, U+3130-318F; }
+@font-face { font-family: 'Nanum Gothic Coding';  src: url('/fonts/NanumGothicCoding-Korean-700.woff2')  format('woff2'); font-weight: 700; font-display: block; unicode-range: U+AC00-D7A3, U+1100-11FF, U+3130-318F; }
+@font-face { font-family: 'Cascadia Code';        src: url('/fonts/CascadiaCode.woff2')  format('woff2'); font-weight: 100 900; font-display: block; }
+@font-face { font-family: 'Cascadia Mono';        src: url('/fonts/CascadiaMono.woff2')  format('woff2'); font-weight: 100 900; font-display: block; }
+@font-face { font-family: 'Hack';                 src: url('/fonts/hack-regular.woff2')  format('woff2'); font-weight: 400;     font-display: block; }
+@font-face { font-family: 'Hack';                 src: url('/fonts/hack-bold.woff2')     format('woff2'); font-weight: 700;     font-display: block; }
+@font-face { font-family: 'D2Coding';             src: url('/fonts/D2Coding.ttf')        format('truetype'); font-weight: 400; font-display: block; }
+@font-face { font-family: 'D2Coding';             src: url('/fonts/D2CodingBold.ttf')    format('truetype'); font-weight: 700; font-display: block; }
+
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
@@ -71,7 +91,17 @@ body {
   padding: 0;
   line-height: 1;
 }
-.btn-sidebar-toggle:hover { color: var(--text); background: var(--surface2); }
+.btn-sidebar-toggle:hover  { color: var(--text); background: var(--surface2); }
+.btn-sidebar-toggle.active { color: var(--accent); background: rgba(88,166,255,0.1); }
+
+.titlebar-spacer  { flex: 1; }
+.titlebar-actions {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 154px; /* Windows min/max/close buttons 확보 */
+}
 
 /* ── 좌측 세션 탭 사이드바 ─────────────────────── */
 .tab-sidebar {
@@ -519,6 +549,107 @@ body {
 /* 버튼 small 변형 */
 .btn-ghost.small { padding: 4px 10px; font-size: 12px; }
 
+/* ── 폰트 설정 패널 ────────────────────────────── */
+.font-panel {
+  position: fixed;
+  top: 38px;
+  right: 154px;
+  z-index: 200;
+  width: 280px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.font-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text);
+}
+
+.font-panel-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.font-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.font-select:focus { border-color: var(--accent); }
+
+.size-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.size-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.size-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.size-btn:disabled { opacity: 0.35; cursor: default; }
+
+.size-input {
+  width: 52px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.size-input:focus { border-color: var(--accent); }
+.size-input::-webkit-inner-spin-button,
+.size-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+.font-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--green);
+  line-height: 1.6;
+  user-select: none;
+}
+
 /* 에러 메시지 */
 .error-msg {
   color: var(--danger);
@@ -528,4 +659,37 @@ body {
   background: rgba(248,81,73,0.1);
   border-radius: 6px;
   border: 1px solid rgba(248,81,73,0.3);
+}
+
+/* ── 분할 터미널 ────────────────────────────────── */
+.pane-wrapper {
+  /* position/size come from inline style (getPaneStyle) */
+  transition: outline 0.1s;
+}
+.pane-wrapper--focused {
+  outline: 1px solid rgba(88, 166, 255, 0.35);
+  outline-offset: -1px;
+}
+
+/* 드래그 중에는 xterm canvas가 마우스 이벤트를 가로채지 않도록 */
+.terminal-area.is-dragging .pane-wrapper {
+  pointer-events: none;
+}
+
+.split-handle {
+  background: transparent;
+  transition: background 0.15s;
+}
+.split-handle:hover,
+.terminal-area.is-dragging .split-handle {
+  background: rgba(88, 166, 255, 0.25);
+}
+
+/* 타이틀바 구분선 */
+.titlebar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  flex-shrink: 0;
+  margin: 0 2px;
 }

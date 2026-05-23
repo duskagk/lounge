@@ -36,4 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 알림
   notify: (title, body) => ipcRenderer.send('notify', { title, body }),
+
+  // 설정
+  getSettings:  ()       => ipcRenderer.invoke('settings:get'),
+  saveSettings: (s)      => ipcRenderer.invoke('settings:set', s),
 })

@@ -6,7 +6,7 @@ import 'xterm/css/xterm.css'
 
 const NOTIFY_THRESHOLD_MS = 5000
 
-export default function TerminalView({ session, active, onConnected }) {
+export default function TerminalView({ session, active, visible, fontFamily, fontSize, onConnected }) {
   const containerRef   = useRef(null)
   const termRef        = useRef(null)
   const fitRef         = useRef(null)
@@ -24,7 +24,15 @@ export default function TerminalView({ session, active, onConnected }) {
     // setTimeout(0)으로 init을 지연시키면 Strict Mode ghost mount의
     // cleanup이 이 타이머를 취소 → xterm이 ghost mount에서 열리지 않으므로
     // RAF 에러 원천 차단, connect도 정확히 1회만 호출됨
-    const initTimer = setTimeout(() => {
+    const initTimer = setTimeout(async () => {
+      if (!containerRef.current) return
+
+      // 폰트가 실제로 로드된 후 터미널을 초기화해야 xterm이 올바른 문자 폭을 측정함.
+      // 로컬 번들 폰트라 거의 즉시 완료됨.
+      try {
+        await document.fonts.load(`${fontSize ?? 14}px "${fontFamily}"`)
+      } catch (_) { /* 폰트 확인 실패 시 그냥 진행 */ }
+
       if (!containerRef.current) return
 
       containerRef.current.innerHTML = ''
@@ -32,8 +40,8 @@ export default function TerminalView({ session, active, onConnected }) {
       const api = window.electronAPI
 
       const term = new Terminal({
-        fontFamily: '"JetBrains Mono", "D2Coding", "Consolas", "Noto Sans Mono CJK KR", monospace',
-        fontSize: 14,
+        fontFamily: `"${fontFamily}", "D2Coding", "Nanum Gothic Coding", monospace`,
+        fontSize: fontSize ?? 14,
         lineHeight: 1.45,
         cursorBlink: true,
         cursorStyle: 'bar',
@@ -194,6 +202,22 @@ export default function TerminalView({ session, active, onConnected }) {
   }, [session.id])
 
   useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    const apply = async () => {
+      try { await document.fonts.load(`${fontSize ?? 14}px "${fontFamily}"`) } catch (_) {}
+      if (!termRef.current) return   // 언마운트 됐으면 중단
+      term.options.fontFamily = `"${fontFamily}", "D2Coding", "Nanum Gothic Coding", monospace`
+      term.options.fontSize   = fontSize ?? 14
+      requestAnimationFrame(() => {
+        fitRef.current?.fit()
+        term.refresh(0, term.rows - 1)
+      })
+    }
+    apply()
+  }, [fontFamily, fontSize])
+
+  useEffect(() => {
     if (active && fitRef.current) {
       setTimeout(() => {
         fitRef.current?.fit()
@@ -222,7 +246,7 @@ export default function TerminalView({ session, active, onConnected }) {
   return (
     <div
       ref={containerRef}
-      style={{ display: active ? 'block' : 'none', width: '100%', height: '100%', padding: '6px 8px' }}
+      style={{ display: (visible !== undefined ? visible : active) ? 'block' : 'none', width: '100%', height: '100%', padding: '6px 8px' }}
     />
   )
 }

@@ -5,9 +5,10 @@ const { Client } = require('ssh2')
 const pty = require('node-pty')
 const os = require('os')
 
+// Suppress Electron security warnings in dev (removes red dashed border)
+process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true'
+
 const isDev = process.env.NODE_ENV === 'development'
-console.log('Node Version:', process.versions.node)
-console.log('Electron Version:', process.versions.electron)
 
 let db
 
@@ -30,7 +31,11 @@ function initDB() {
       auto_connect INTEGER DEFAULT 0,
       sort_order   INTEGER DEFAULT 0,
       created_at   INTEGER NOT NULL
-    )
+    );
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `)
   // 기존 DB 마이그레이션
   try { db.exec(`ALTER TABLE profiles ADD COLUMN cwd      TEXT DEFAULT ''`) } catch (_) {}
@@ -242,7 +247,7 @@ ipcMain.on(    'clipboard:write', (_, text)  => clipboard.writeText(text))
 // ── 파일 탐색 다이얼로그 ──────────────────────────────────────────────────────
 ipcMain.handle('dialog:openFile', async () => {
   const result = await dialog.showOpenDialog({
-    title: 'SSH 키 파일 선택',
+    title: 'Select SSH Key File',
     properties: ['openFile'],
     filters: [
       { name: 'SSH Keys', extensions: ['', 'pem', 'key', 'ppk'] },
@@ -254,10 +259,30 @@ ipcMain.handle('dialog:openFile', async () => {
 
 ipcMain.handle('dialog:openFolder', async () => {
   const result = await dialog.showOpenDialog({
-    title: '시작 디렉토리 선택',
+    title: 'Select Start Directory',
     properties: ['openDirectory'],
   })
   return result.canceled ? null : result.filePaths[0]
+})
+
+// ── 설정 (SQLite) ─────────────────────────────────────────────────────────────
+const SETTING_DEFAULTS = { fontFamily: 'JetBrains Mono', fontSize: '14' }
+
+ipcMain.handle('settings:get', () => {
+  const rows = db.prepare('SELECT key, value FROM settings').all()
+  const map  = Object.fromEntries(rows.map(r => [r.key, r.value]))
+  return {
+    fontFamily: map.fontFamily || SETTING_DEFAULTS.fontFamily,
+    fontSize:   parseInt(map.fontSize || SETTING_DEFAULTS.fontSize, 10),
+  }
+})
+
+ipcMain.handle('settings:set', (_, settings) => {
+  const stmt = db.prepare(
+    'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value'
+  )
+  for (const [key, value] of Object.entries(settings)) stmt.run(key, String(value))
+  return { ok: true }
 })
 
 // ── 알림 ──────────────────────────────────────────────────────────────────────
