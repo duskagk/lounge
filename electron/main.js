@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, Notification, dialog, clipboard } = require('electron')
 const fs = require('fs')
+const net = require('net')
 const path = require('path')
 const { Client } = require('ssh2')
 const pty = require('node-pty')
@@ -36,6 +37,13 @@ function initDB() {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS port_forwards (
+      id          TEXT    PRIMARY KEY,
+      profile_id  TEXT    NOT NULL,
+      local_port  INTEGER NOT NULL,
+      remote_host TEXT    NOT NULL DEFAULT 'localhost',
+      remote_port INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS terminal_logs (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT    NOT NULL,
@@ -65,8 +73,13 @@ function initDB() {
     `)
   } catch (_) {}
   // 기존 DB 마이그레이션
-  try { db.exec(`ALTER TABLE profiles ADD COLUMN cwd      TEXT DEFAULT ''`) } catch (_) {}
-  try { db.exec(`ALTER TABLE profiles ADD COLUMN key_path TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN cwd           TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN key_path      TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN jump_host     TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN jump_port     INTEGER DEFAULT 22`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN jump_username TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN jump_password TEXT DEFAULT ''`) } catch (_) {}
+  try { db.exec(`ALTER TABLE profiles ADD COLUMN jump_key_path TEXT DEFAULT ''`) } catch (_) {}
 }
 
 function createWindow() {
@@ -112,57 +125,101 @@ app.on('window-all-closed', () => {
 // ── SSH ───────────────────────────────────────────────────────────────────────
 const sshSessions = new Map()
 
-ipcMain.handle('ssh:connect', async (event, { id, host, port, username, password, privateKey, keyPath }) => {
-  return new Promise((resolve, reject) => {
-    // keyPath가 있으면 파일에서 키를 읽어옴, 없으면 직접 입력한 키 사용
-    let resolvedKey = privateKey || ''
-    if (keyPath) {
-      try {
-        resolvedKey = fs.readFileSync(keyPath.trim(), 'utf8')
-      } catch (err) {
-        return reject(`키 파일을 읽을 수 없습니다: ${keyPath}\n${err.message}`)
-      }
+// keyPath로 키 파일 읽기 헬퍼
+function readKey(keyPath, privateKey) {
+  if (keyPath) {
+    try { return fs.readFileSync(keyPath.trim(), 'utf8') } catch (e) {
+      throw new Error(`키 파일을 읽을 수 없습니다: ${keyPath}\n${e.message}`)
     }
+  }
+  return privateKey || ''
+}
 
-    const conn = new Client()
+// SSH Client 빌드 헬퍼
+function buildSshCfg({ host, port, username, password, privateKey, keyPath }) {
+  const key = readKey(keyPath, privateKey)
+  const cfg = { host, port: port || 22, username, readyTimeout: 10000, keepaliveInterval: 30000, tryKeyboard: true }
+  if (key)      cfg.privateKey = key
+  else if (password) cfg.password = password
+  return cfg
+}
 
-    conn.on('ready', () => {
+ipcMain.handle('ssh:connect', async (event, { id, host, port, username, password, privateKey, keyPath,
+                                              jumpHost, jumpPort, jumpUsername, jumpPassword, jumpKeyPath,
+                                              portForwards }) => {
+  return new Promise((resolve, reject) => {
+    // ── 공통: shell 열기 + 포트포워딩 설정 ──────────────────────────────
+    function openShell(conn, jumpConn) {
       conn.shell({ term: 'xterm-256color', rows: 24, cols: 80 }, (err, stream) => {
         if (err) return reject(err.message)
-        sshSessions.set(id, { conn, stream })
 
-        stream.on('data', (data) => {
-          event.sender.send(`ssh:data:${id}`, data.toString('utf8'))
-        })
-        stream.stderr.on('data', (data) => {
-          event.sender.send(`ssh:data:${id}`, data.toString('utf8'))
-        })
+        const tcpServers = []
+        for (const fwd of (portForwards || [])) {
+          const server = net.createServer((socket) => {
+            conn.forwardOut('127.0.0.1', fwd.localPort, fwd.remoteHost || 'localhost', fwd.remotePort, (err, ch) => {
+              if (err) { socket.destroy(); return }
+              socket.pipe(ch); ch.pipe(socket)
+              socket.on('error', () => { try { ch.destroy()     } catch (_) {} })
+              ch.on('error',     () => { try { socket.destroy() } catch (_) {} })
+              ch.on('close',     () => { try { socket.destroy() } catch (_) {} })
+            })
+          })
+          server.on('error', (e) => console.error(`[portfwd] ${fwd.localPort}: ${e.message}`))
+          server.listen(fwd.localPort, '127.0.0.1', () =>
+            console.log(`[portfwd] 127.0.0.1:${fwd.localPort} → ${fwd.remoteHost || 'localhost'}:${fwd.remotePort}`)
+          )
+          tcpServers.push(server)
+        }
+
+        sshSessions.set(id, { conn, jumpConn, stream, tcpServers })
+
+        stream.on('data',       (data) => event.sender.send(`ssh:data:${id}`, data.toString('utf8')))
+        stream.stderr.on('data',(data) => event.sender.send(`ssh:data:${id}`, data.toString('utf8')))
         stream.on('close', () => {
+          tcpServers.forEach(s => { try { s.close() } catch (_) {} })
           event.sender.send(`ssh:close:${id}`)
           sshSessions.delete(id)
         })
         resolve({ ok: true })
       })
-    })
-
-    // keyboard-interactive 인증 (Ubuntu 등 많은 서버가 password 대신 이 방식 사용)
-    conn.on('keyboard-interactive', (_name, _inst, _lang, prompts, finish) => {
-      finish(prompts.map(() => password || ''))
-    })
-
-    conn.on('error', (err) => reject(err.message))
-
-    const cfg = {
-      host,
-      port:              port || 22,
-      username,
-      readyTimeout:      10000,
-      keepaliveInterval: 30000,
-      tryKeyboard:       true,   // keyboard-interactive 인증 시도 허용
     }
-    if (resolvedKey)   cfg.privateKey = resolvedKey
-    else if (password) cfg.password   = password   // 빈 문자열이면 아예 안 보냄
-    conn.connect(cfg)
+
+    // ── 직접 연결 ────────────────────────────────────────────────────────
+    if (!jumpHost) {
+      let cfg
+      try { cfg = buildSshCfg({ host, port, username, password, privateKey, keyPath }) }
+      catch (e) { return reject(e.message) }
+
+      const conn = new Client()
+      conn.on('ready', () => openShell(conn, null))
+      conn.on('keyboard-interactive', (_n, _i, _l, prompts, finish) => finish(prompts.map(() => password || '')))
+      conn.on('error', (e) => reject(e.message))
+      conn.connect(cfg)
+
+    // ── ProxyJump ─────────────────────────────────────────────────────────
+    } else {
+      let jumpCfg, targetCfg
+      try {
+        jumpCfg   = buildSshCfg({ host: jumpHost, port: jumpPort, username: jumpUsername, password: jumpPassword, keyPath: jumpKeyPath })
+        targetCfg = buildSshCfg({ host, port, username, password, privateKey, keyPath })
+      } catch (e) { return reject(e.message) }
+
+      const jumpConn = new Client()
+      jumpConn.on('ready', () => {
+        jumpConn.forwardOut('127.0.0.1', 0, host, port || 22, (err, stream) => {
+          if (err) return reject(`ProxyJump forward failed: ${err.message}`)
+
+          const conn = new Client()
+          conn.on('ready', () => openShell(conn, jumpConn))
+          conn.on('keyboard-interactive', (_n, _i, _l, prompts, finish) => finish(prompts.map(() => password || '')))
+          conn.on('error', (e) => reject(e.message))
+          conn.connect({ ...targetCfg, sock: stream })
+        })
+      })
+      jumpConn.on('keyboard-interactive', (_n, _i, _l, prompts, finish) => finish(prompts.map(() => jumpPassword || '')))
+      jumpConn.on('error', (e) => reject(`Jump host error: ${e.message}`))
+      jumpConn.connect(jumpCfg)
+    }
   })
 })
 
@@ -170,7 +227,13 @@ ipcMain.on('ssh:input',      (_, { id, data })       => { sshSessions.get(id)?.s
 ipcMain.on('ssh:resize',     (_, { id, cols, rows }) => { sshSessions.get(id)?.stream?.setWindow(rows, cols, 0, 0) })
 ipcMain.on('ssh:disconnect', (_, { id }) => {
   const s = sshSessions.get(id)
-  if (s) { s.stream?.close(); s.conn?.end(); sshSessions.delete(id) }
+  if (s) {
+    s.tcpServers?.forEach(srv => { try { srv.close()  } catch (_) {} })
+    s.stream?.close()
+    s.conn?.end()
+    s.jumpConn?.end()
+    sshSessions.delete(id)
+  }
 })
 
 // ── Local PTY ─────────────────────────────────────────────────────────────────
@@ -216,53 +279,84 @@ ipcMain.on('local:disconnect', (_, { id }) => {
 
 // ── 프로필 (SQLite) ───────────────────────────────────────────────────────────
 ipcMain.handle('profiles:getAll', () => {
-  return db.prepare(
-    'SELECT * FROM profiles ORDER BY sort_order ASC, created_at ASC'
-  ).all().map(r => ({
-    id:          r.id,
-    name:        r.name,
-    type:        r.type,
-    host:        r.host,
-    port:        r.port,
-    username:    r.username,
-    password:    r.password,
-    privateKey:  r.private_key,
-    keyPath:     r.key_path,
-    cwd:         r.cwd,
-    autoConnect: r.auto_connect === 1,
-    sortOrder:   r.sort_order,
+  const rows = db.prepare('SELECT * FROM profiles ORDER BY sort_order ASC, created_at ASC').all()
+  const fwdRows = db.prepare('SELECT * FROM port_forwards ORDER BY local_port ASC').all()
+  const fwdMap = {}
+  for (const f of fwdRows) {
+    ;(fwdMap[f.profile_id] ||= []).push({
+      id: f.id, localPort: f.local_port, remoteHost: f.remote_host, remotePort: f.remote_port,
+    })
+  }
+  return rows.map(r => ({
+    id:           r.id,
+    name:         r.name,
+    type:         r.type,
+    host:         r.host,
+    port:         r.port,
+    username:     r.username,
+    password:     r.password,
+    privateKey:   r.private_key,
+    keyPath:      r.key_path,
+    cwd:          r.cwd,
+    autoConnect:  r.auto_connect === 1,
+    sortOrder:    r.sort_order,
+    portForwards: fwdMap[r.id] || [],
+    jumpHost:     r.jump_host     || '',
+    jumpPort:     r.jump_port     || 22,
+    jumpUsername: r.jump_username || '',
+    jumpPassword: r.jump_password || '',
+    jumpKeyPath:  r.jump_key_path || '',
   }))
 })
 
 ipcMain.handle('profiles:save', (_, p) => {
   db.prepare(`
     INSERT INTO profiles
-      (id, name, type, host, port, username, password, private_key, key_path, cwd, auto_connect, sort_order, created_at)
+      (id, name, type, host, port, username, password, private_key, key_path, cwd,
+       auto_connect, sort_order, created_at,
+       jump_host, jump_port, jump_username, jump_password, jump_key_path)
     VALUES
-      (@id, @name, @type, @host, @port, @username, @password, @privateKey, @keyPath, @cwd, @autoConnect, @sortOrder, @createdAt)
+      (@id, @name, @type, @host, @port, @username, @password, @privateKey, @keyPath, @cwd,
+       @autoConnect, @sortOrder, @createdAt,
+       @jumpHost, @jumpPort, @jumpUsername, @jumpPassword, @jumpKeyPath)
     ON CONFLICT(id) DO UPDATE SET
       name=@name, type=@type, host=@host, port=@port,
       username=@username, password=@password, private_key=@privateKey,
-      key_path=@keyPath, cwd=@cwd, auto_connect=@autoConnect, sort_order=@sortOrder
+      key_path=@keyPath, cwd=@cwd, auto_connect=@autoConnect, sort_order=@sortOrder,
+      jump_host=@jumpHost, jump_port=@jumpPort, jump_username=@jumpUsername,
+      jump_password=@jumpPassword, jump_key_path=@jumpKeyPath
   `).run({
-    id:          p.id,
-    name:        p.name,
-    type:        p.type        || 'ssh',
-    host:        p.host        || '',
-    port:        p.port        || 22,
-    username:    p.username    || '',
-    password:    p.password    || '',
-    privateKey:  p.privateKey  || '',
-    keyPath:     p.keyPath     || '',
-    cwd:         p.cwd         || '',
-    autoConnect: p.autoConnect ? 1 : 0,
-    sortOrder:   p.sortOrder   || 0,
-    createdAt:   Date.now(),
+    id:           p.id,
+    name:         p.name,
+    type:         p.type         || 'ssh',
+    host:         p.host         || '',
+    port:         p.port         || 22,
+    username:     p.username     || '',
+    password:     p.password     || '',
+    privateKey:   p.privateKey   || '',
+    keyPath:      p.keyPath      || '',
+    cwd:          p.cwd          || '',
+    autoConnect:  p.autoConnect ? 1 : 0,
+    sortOrder:    p.sortOrder    || 0,
+    createdAt:    Date.now(),
+    jumpHost:     p.jumpHost     || '',
+    jumpPort:     p.jumpPort     || 22,
+    jumpUsername: p.jumpUsername || '',
+    jumpPassword: p.jumpPassword || '',
+    jumpKeyPath:  p.jumpKeyPath  || '',
   })
+  // port forwards 교체 저장
+  db.prepare('DELETE FROM port_forwards WHERE profile_id = ?').run(p.id)
+  for (const f of (p.portForwards || [])) {
+    db.prepare(
+      'INSERT INTO port_forwards (id, profile_id, local_port, remote_host, remote_port) VALUES (?, ?, ?, ?, ?)'
+    ).run(f.id || `fwd-${Date.now()}-${Math.random().toString(36).slice(2)}`, p.id, f.localPort, f.remoteHost || 'localhost', f.remotePort)
+  }
   return { ok: true }
 })
 
 ipcMain.handle('profiles:delete', (_, id) => {
+  db.prepare('DELETE FROM port_forwards WHERE profile_id = ?').run(id)
   db.prepare('DELETE FROM profiles WHERE id = ?').run(id)
   return { ok: true }
 })

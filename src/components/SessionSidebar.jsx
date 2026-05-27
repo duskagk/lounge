@@ -4,6 +4,12 @@ const EMPTY_FORM = {
   type: 'ssh', name: '', host: '', port: '22',
   username: '', password: '', privateKey: '',
   keyPath: '', cwd: '', autoConnect: false,
+  portForwards: [],
+  jumpHost: '', jumpPort: '22', jumpUsername: '', jumpPassword: '', jumpKeyPath: '',
+}
+
+function newFwd() {
+  return { id: `fwd-${Date.now()}-${Math.random().toString(36).slice(2)}`, localPort: '', remoteHost: 'localhost', remotePort: '' }
 }
 
 export default function SessionSidebar({ profiles, onConnect, onClose, onRefresh }) {
@@ -25,16 +31,24 @@ export default function SessionSidebar({ profiles, onConnect, onClose, onRefresh
   const openEditForm = (p) => {
     setEditing(p)
     setForm({
-      type:        p.type,
-      name:        p.name,
-      host:        p.host        || '',
-      port:        String(p.port || 22),
-      username:    p.username    || '',
-      password:    p.password    || '',
-      privateKey:  p.privateKey  || '',
-      keyPath:     p.keyPath     || '',
-      cwd:         p.cwd         || '',
-      autoConnect: p.autoConnect || false,
+      type:         p.type,
+      name:         p.name,
+      host:         p.host        || '',
+      port:         String(p.port || 22),
+      username:     p.username    || '',
+      password:     p.password    || '',
+      privateKey:   p.privateKey  || '',
+      keyPath:      p.keyPath     || '',
+      cwd:          p.cwd         || '',
+      autoConnect:  p.autoConnect || false,
+      portForwards: (p.portForwards || []).map(f => ({
+        ...f, localPort: String(f.localPort), remotePort: String(f.remotePort),
+      })),
+      jumpHost:     p.jumpHost     || '',
+      jumpPort:     String(p.jumpPort || 22),
+      jumpUsername: p.jumpUsername || '',
+      jumpPassword: p.jumpPassword || '',
+      jumpKeyPath:  p.jumpKeyPath  || '',
     })
     setError('')
     setView('form')
@@ -74,29 +88,43 @@ export default function SessionSidebar({ profiles, onConnect, onClose, onRefresh
   }
 
   const buildProfile = () => ({
-    id:          editing?.id || `profile-${Date.now()}`,
-    type:        form.type,
-    name:        form.name,
-    host:        form.host,
-    port:        parseInt(form.port) || 22,
-    username:    form.username,
-    password:    form.password,
-    privateKey:  form.privateKey,
-    keyPath:     form.keyPath,
-    cwd:         form.cwd,
-    autoConnect: form.autoConnect,
+    id:           editing?.id || `profile-${Date.now()}`,
+    type:         form.type,
+    name:         form.name,
+    host:         form.host,
+    port:         parseInt(form.port) || 22,
+    username:     form.username,
+    password:     form.password,
+    privateKey:   form.privateKey,
+    keyPath:      form.keyPath,
+    cwd:          form.cwd,
+    autoConnect:  form.autoConnect,
+    portForwards: form.portForwards
+      .filter(f => f.localPort && f.remotePort)
+      .map(f => ({ ...f, localPort: parseInt(f.localPort), remotePort: parseInt(f.remotePort) })),
+    jumpHost:     form.jumpHost,
+    jumpPort:     parseInt(form.jumpPort) || 22,
+    jumpUsername: form.jumpUsername,
+    jumpPassword: form.jumpPassword,
+    jumpKeyPath:  form.jumpKeyPath,
   })
 
   const buildSession = (p) => ({
-    type:       p.type,
-    label:      p.name,
-    host:       p.host,
-    port:       p.port,
-    username:   p.username,
-    password:   p.password,
-    privateKey: p.privateKey,
-    cwd:        p.cwd,
-    profileId:  p.id,   // 재시작 후에도 같은 세션 히스토리를 찾을 수 있는 stable key
+    type:         p.type,
+    label:        p.name,
+    host:         p.host,
+    port:         p.port,
+    username:     p.username,
+    password:     p.password,
+    privateKey:   p.privateKey,
+    cwd:          p.cwd,
+    profileId:    p.id,
+    portForwards: p.portForwards || [],
+    jumpHost:     p.jumpHost     || '',
+    jumpPort:     p.jumpPort     || 22,
+    jumpUsername: p.jumpUsername || '',
+    jumpPassword: p.jumpPassword || '',
+    jumpKeyPath:  p.jumpKeyPath  || '',
   })
 
   const handleDelete = async (e, id) => {
@@ -253,6 +281,90 @@ export default function SessionSidebar({ profiles, onConnect, onClose, onRefresh
                   <label>Private Key (optional, paste)</label>
                   <textarea value={form.privateKey} onChange={set('privateKey')}
                     placeholder={'-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'} />
+                </div>
+
+                {/* ProxyJump */}
+                <div className="form-group">
+                  <label>ProxyJump (optional)</label>
+                  <div className="form-row">
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <input value={form.jumpHost} onChange={set('jumpHost')} placeholder="jump-host (leave blank to disable)" />
+                    </div>
+                    <div className="form-group short">
+                      <input value={form.jumpPort} onChange={set('jumpPort')} placeholder="22" />
+                    </div>
+                  </div>
+                  {form.jumpHost && (
+                    <>
+                      <div className="form-group" style={{ marginTop: 4 }}>
+                        <input value={form.jumpUsername} onChange={set('jumpUsername')} placeholder="Username" />
+                      </div>
+                      <div className="form-group" style={{ marginTop: 4 }}>
+                        <input type="password" value={form.jumpPassword} onChange={set('jumpPassword')} placeholder="Password" />
+                      </div>
+                      <div className="form-group" style={{ marginTop: 4, display: 'flex', gap: 6 }}>
+                        <input value={form.jumpKeyPath} onChange={set('jumpKeyPath')}
+                          placeholder="Key file path (optional)" style={{ flex: 1 }} />
+                        <button className="btn-ghost small" onClick={async () => {
+                          const p = await window.electronAPI.browseFile()
+                          if (p) setForm(prev => ({ ...prev, jumpKeyPath: p }))
+                        }}>Browse</button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Port Forwarding */}
+                <div className="form-group">
+                  <label>Port Forwarding</label>
+                  {form.portForwards.length > 0 && (
+                    <div className="pf-list">
+                      {form.portForwards.map((f, i) => (
+                        <div key={f.id} className="pf-row">
+                          <input
+                            className="pf-input pf-port"
+                            value={f.localPort}
+                            onChange={e => setForm(prev => {
+                              const fwds = [...prev.portForwards]
+                              fwds[i] = { ...fwds[i], localPort: e.target.value }
+                              return { ...prev, portForwards: fwds }
+                            })}
+                            placeholder="local"
+                          />
+                          <span className="pf-arrow">→</span>
+                          <input
+                            className="pf-input pf-host"
+                            value={f.remoteHost}
+                            onChange={e => setForm(prev => {
+                              const fwds = [...prev.portForwards]
+                              fwds[i] = { ...fwds[i], remoteHost: e.target.value }
+                              return { ...prev, portForwards: fwds }
+                            })}
+                            placeholder="localhost"
+                          />
+                          <span className="pf-colon">:</span>
+                          <input
+                            className="pf-input pf-port"
+                            value={f.remotePort}
+                            onChange={e => setForm(prev => {
+                              const fwds = [...prev.portForwards]
+                              fwds[i] = { ...fwds[i], remotePort: e.target.value }
+                              return { ...prev, portForwards: fwds }
+                            })}
+                            placeholder="remote"
+                          />
+                          <button className="pf-remove" onClick={() => setForm(prev => ({
+                            ...prev,
+                            portForwards: prev.portForwards.filter((_, j) => j !== i),
+                          }))}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button className="btn-ghost small" style={{ marginTop: 4 }}
+                    onClick={() => setForm(prev => ({ ...prev, portForwards: [...prev.portForwards, newFwd()] }))}>
+                    + Add Rule
+                  </button>
                 </div>
               </>
             )}

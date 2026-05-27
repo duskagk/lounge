@@ -347,6 +347,12 @@ export default function TerminalView({ session, logId, active, visible, fontFami
             id: session.id, host: session.host, port: session.port,
             username: session.username, password: session.password,
             privateKey: session.privateKey, keyPath: session.keyPath,
+            portForwards: session.portForwards || [],
+            jumpHost:     session.jumpHost     || '',
+            jumpPort:     session.jumpPort     || 22,
+            jumpUsername: session.jumpUsername || '',
+            jumpPassword: session.jumpPassword || '',
+            jumpKeyPath:  session.jumpKeyPath  || '',
           }).then((res) => {
             if (termRef.current !== term) return
             if (res.ok) {

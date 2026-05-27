@@ -980,3 +980,51 @@ body {
   opacity: 0.35;
   cursor: default;
 }
+
+/* ── Port Forwarding 폼 ─────────────────────────────────────────────────── */
+.pf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 2px;
+}
+
+.pf-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pf-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 12px;
+  padding: 3px 6px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pf-input:focus { border-color: var(--accent); }
+
+.pf-port { width: 58px; text-align: center; }
+.pf-host { flex: 1; min-width: 0; }
+
+.pf-arrow, .pf-colon {
+  color: var(--fg-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.pf-remove {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.pf-remove:hover { color: var(--danger); }
