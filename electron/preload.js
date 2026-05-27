@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   offSshClose:   (id, cb)         => ipcRenderer.removeListener(`ssh:close:${id}`, cb),
 
   // Local PTY
+  localCheckin:    ()               => ipcRenderer.invoke('local:checkin'),
   localConnect:    (id, cwd)        => ipcRenderer.invoke('local:connect', { id, cwd }),
   localInput:      (id, data)       => ipcRenderer.send('local:input', { id, data }),
   localResize:     (id, cols, rows) => ipcRenderer.send('local:resize', { id, cols, rows }),

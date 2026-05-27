@@ -283,6 +283,36 @@ ipcMain.handle('ssh:checkin', (_, { id }) => {
   })
 })
 
+// ── Local check-in (Node os module, no exec needed) ──────────────────────────
+ipcMain.handle('local:checkin', () => {
+  try {
+    const platform = os.platform()
+    let osName = os.type()
+
+    if (platform === 'win32') {
+      osName = os.version()  // e.g. "Windows 11 Pro"
+    } else if (platform === 'darwin') {
+      try {
+        const { execSync } = require('child_process')
+        const name = execSync('sw_vers -productName', { timeout: 2000 }).toString().trim()
+        const ver  = execSync('sw_vers -productVersion', { timeout: 2000 }).toString().trim()
+        osName = `${name} ${ver}`
+      } catch (_) { osName = 'macOS' }
+    } else {
+      try {
+        const content = fs.readFileSync('/etc/os-release', 'utf8')
+        const m = content.match(/PRETTY_NAME="?([^"\n]+)"?/)
+        if (m) osName = m[1]
+      } catch (_) {}
+    }
+
+    const arch   = os.arch() === 'x64' ? 'x86_64' : os.arch()
+    const cpu    = String(os.cpus().length)
+    const memGiB = Math.round(os.totalmem() / 1073741824)
+    return { os: osName, arch, cpu, mem: `${memGiB}Gi`, disk: '', tools: [], services: [] }
+  } catch (_) { return null }
+})
+
 // ── Local PTY ─────────────────────────────────────────────────────────────────
 const localSessions = new Map()
 

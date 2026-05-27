@@ -560,6 +560,10 @@ function App() {
                           window.electronAPI?.sshCheckin(s.id).then(data => {
                             if (data) setCheckinData(prev => ({ ...prev, [s.id]: data }))
                           }).catch(() => {})
+                        } else if (s.type === 'local') {
+                          window.electronAPI?.localCheckin().then(data => {
+                            if (data) setCheckinData(prev => ({ ...prev, [s.id]: data }))
+                          }).catch(() => {})
                         }
                       }}
                     />
