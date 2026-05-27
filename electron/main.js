@@ -236,6 +236,48 @@ ipcMain.on('ssh:disconnect', (_, { id }) => {
   }
 })
 
+const CHECKIN_CMD = [
+  'OS=$(grep -m1 PRETTY_NAME /etc/os-release 2>/dev/null | sed \'s/PRETTY_NAME=//;s/"//g\' || uname -s)',
+  'ARCH=$(uname -m)',
+  'CPU=$(nproc 2>/dev/null || echo ?)',
+  'MEM=$(free -h 2>/dev/null | awk \'/^Mem/{print $2}\' || echo ?)',
+  'DISK=$(df -h / 2>/dev/null | awk \'NR>1{print $2; exit}\')',
+  'printf "OS:%s\\nARCH:%s\\nCPU:%s\\nMEM:%s\\nDISK:%s\\n" "$OS" "$ARCH" "$CPU" "$MEM" "$DISK"',
+  'for t in git docker kubectl helm node python3 go java nginx mysql postgres redis; do which $t >/dev/null 2>&1 && echo "TOOL:$t"; done',
+  'for svc in nginx apache2 mysql postgresql redis-server redis mongod docker; do systemctl is-active $svc 2>/dev/null | grep -q active && echo "SVC:$svc"; done',
+].join('; ')
+
+ipcMain.handle('ssh:checkin', (_, { id }) => {
+  return new Promise((resolve) => {
+    const s = sshSessions.get(id)
+    if (!s) return resolve(null)
+    s.conn.exec(CHECKIN_CMD, (err, stream) => {
+      if (err) return resolve(null)
+      let out = ''
+      stream.on('data', d => { out += d.toString() })
+      stream.stderr.on('data', () => {})
+      stream.on('close', () => {
+        const lines = out.split('\n').filter(Boolean)
+        const result = { os: '', arch: '', cpu: '', mem: '', disk: '', tools: [], services: [] }
+        for (const line of lines) {
+          const col = line.indexOf(':')
+          if (col === -1) continue
+          const key = line.slice(0, col)
+          const val = line.slice(col + 1).trim()
+          if      (key === 'OS')   result.os   = val
+          else if (key === 'ARCH') result.arch = val
+          else if (key === 'CPU')  result.cpu  = val
+          else if (key === 'MEM')  result.mem  = val
+          else if (key === 'DISK') result.disk = val
+          else if (key === 'TOOL') result.tools.push(val)
+          else if (key === 'SVC')  result.services.push(val)
+        }
+        resolve(result)
+      })
+    })
+  })
+})
+
 // ── Local PTY ─────────────────────────────────────────────────────────────────
 const localSessions = new Map()
 

@@ -138,9 +138,8 @@ body {
 
 .tab-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  flex-direction: column;
+  padding: 6px 10px;
   border-radius: 7px;
   margin-bottom: 2px;
   cursor: pointer;
@@ -153,14 +152,56 @@ body {
   background: var(--surface2);
   border-color: var(--border);
 }
+
+.tab-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 /* icons 모드: 도트만 중앙 정렬 */
 .tab-sidebar--icons .tab-item {
-  justify-content: center;
+  align-items: center;
   padding: 10px 0;
   margin: 2px 6px;
 }
 .tab-sidebar--icons .tab-dot {
   width: 8px; height: 8px;
+}
+
+.tab-checkin {
+  margin-top: 4px;
+  padding-left: 14px;
+}
+.tab-checkin-os {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+.tab-checkin-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.tab-checkin-tag {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  background: rgba(88,166,255,0.08);
+  border: 1px solid rgba(88,166,255,0.18);
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.tab-checkin-tag--svc {
+  color: var(--green);
+  background: rgba(63,185,80,0.08);
+  border-color: rgba(63,185,80,0.25);
 }
 
 .tab-dot {

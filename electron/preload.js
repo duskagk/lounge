@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   sshInput:      (id, data)       => ipcRenderer.send('ssh:input', { id, data }),
   sshResize:     (id, cols, rows) => ipcRenderer.send('ssh:resize', { id, cols, rows }),
   sshDisconnect: (id)             => ipcRenderer.send('ssh:disconnect', { id }),
+  sshCheckin:    (id)             => ipcRenderer.invoke('ssh:checkin', { id }),
   onSshData:     (id, cb)         => ipcRenderer.on(`ssh:data:${id}`, (_, d) => cb(d)),
   onSshClose:    (id, cb)         => ipcRenderer.on(`ssh:close:${id}`, cb),
   offSshData:    (id, cb)         => ipcRenderer.removeListener(`ssh:data:${id}`, cb),

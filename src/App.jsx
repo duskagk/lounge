@@ -186,6 +186,8 @@ function App() {
   // 로그 캡처: 세션별 on/off { [sessionId]: boolean }
   const [sessionLogging,  setSessionLogging]  = useState({})
   const [logSearchOpen,   setLogSearchOpen]   = useState(false)
+  // 체크인: SSH 접속 시 자동 스캔 결과 { [sessionId]: { os, arch, cpu, mem, disk, tools, services } }
+  const [checkinData,     setCheckinData]     = useState({})
 
   // Refs (stale-closure prevention)
   const activeTabIdRef     = useRef(activeTabId)
@@ -284,6 +286,7 @@ function App() {
       setAllSessions(prev => prev.filter(s => s.id !== id && s.primaryTabId !== id))
       setTabSplitTrees(prev => { const n = { ...prev }; delete n[id]; return n })
       setTabActivePaneId(prev => { const n = { ...prev }; delete n[id]; return n })
+      setCheckinData(prev => { const n = { ...prev }; delete n[id]; return n })
 
       if (activeTabIdRef.current === id) {
         const remaining = sessions.filter(s => s.primaryTabId === null && s.id !== id)
@@ -441,25 +444,45 @@ function App() {
             {primarySessions.length === 0 && isExpanded && (
               <p className="tab-sidebar-empty">No open sessions</p>
             )}
-            {primarySessions.map(s => (
-              <div
-                key={s.id}
-                className={`tab-item ${s.id === activeTabId ? 'active' : ''}`}
-                onClick={() => setActiveTabId(s.id)}
-                title={s.label}
-              >
-                <span className={`tab-dot ${s.connected ? 'connected' : ''}`} />
-                {!isIcons && (
-                  <>
-                    <span className="tab-item-label">{s.label}</span>
-                    <span
-                      className="tab-item-close"
-                      onClick={e => { e.stopPropagation(); removeSession(s.id) }}
-                    >×</span>
-                  </>
-                )}
-              </div>
-            ))}
+            {primarySessions.map(s => {
+              const ci = checkinData[s.id]
+              return (
+                <div
+                  key={s.id}
+                  className={`tab-item ${s.id === activeTabId ? 'active' : ''}`}
+                  onClick={() => setActiveTabId(s.id)}
+                  title={s.label}
+                >
+                  <div className="tab-item-row">
+                    <span className={`tab-dot ${s.connected ? 'connected' : ''}`} />
+                    {!isIcons && (
+                      <>
+                        <span className="tab-item-label">{s.label}</span>
+                        <span
+                          className="tab-item-close"
+                          onClick={e => { e.stopPropagation(); removeSession(s.id) }}
+                        >×</span>
+                      </>
+                    )}
+                  </div>
+                  {isExpanded && ci && (
+                    <div className="tab-checkin">
+                      <div className="tab-checkin-os">{ci.os}{ci.arch ? ` · ${ci.arch}` : ''}</div>
+                      {(ci.tools.length > 0 || ci.services.length > 0) && (
+                        <div className="tab-checkin-tags">
+                          {ci.services.slice(0, 3).map(t => (
+                            <span key={t} className="tab-checkin-tag tab-checkin-tag--svc">{t}</span>
+                          ))}
+                          {ci.tools.slice(0, 4).map(t => (
+                            <span key={t} className="tab-checkin-tag">{t}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
           <div className="tab-sidebar-footer">
             <button
@@ -525,9 +548,14 @@ function App() {
                       fontFamily={fontFamily}
                       fontSize={fontSize}
                       logEnabled={sessionLogging[s.id] ?? false}
-                      onConnected={() =>
+                      onConnected={() => {
                         setAllSessions(prev => prev.map(p => p.id === s.id ? { ...p, connected: true } : p))
-                      }
+                        if (s.type === 'ssh') {
+                          window.electronAPI?.sshCheckin(s.id).then(data => {
+                            if (data) setCheckinData(prev => ({ ...prev, [s.id]: data }))
+                          }).catch(() => {})
+                        }
+                      }}
                     />
                   </div>
                 )
