@@ -9,6 +9,10 @@ Like an airport lounge — where agents wait, connections stay warm, and work be
 
 <br />
 
+![Lounge screenshot](docs/screenshots/20260528.png)
+
+<br />
+
 ## Features
 
 ### Session Management
@@ -20,11 +24,18 @@ Like an airport lounge — where agents wait, connections stay warm, and work be
 ### SSH
 - Password, private key, and key file path authentication
 - Automatic `keyboard-interactive` handling (Ubuntu, Debian, etc.)
-- Save and instantly reconnect to any server
-- **Auto-reconnect** — automatically retries on disconnect (up to 5 attempts, exponential backoff)
+- **Auto-reconnect** — retries on disconnect (up to 5 attempts, exponential backoff)
+- **Port forwarding** — configure local → remote TCP tunnels per profile
+- **ProxyJump** — connect through a jump host with separate credentials
+
+### Check-in
+- On connect, automatically scans the remote server in the background
+- Shows OS, architecture, detected tools, and active services in the sidebar
+- Works on Linux, macOS, and Windows SSH targets
+- Local terminals show the host OS without any subprocess overhead
 
 ### Terminal
-- Split panes — unlimited horizontal/vertical splits per tab (Ctrl+Shift+H / V / W)
+- **Split panes** — unlimited horizontal/vertical splits per tab (`Ctrl+Shift+H` / `V` / `W`)
 - **In-pane search** — `Ctrl+F` to search terminal output with match highlighting
 - Set a start directory per local profile (one terminal per project)
 - Font family and size settings (10 built-in fonts + custom)
