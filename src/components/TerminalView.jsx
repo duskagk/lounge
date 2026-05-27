@@ -1,10 +1,20 @@
-import { useEffect, useRef, useCallback } from 'react'
-import { Terminal } from 'xterm'
+import { useEffect, useRef, useCallback, useState } from 'react'
+import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
-import 'xterm/css/xterm.css'
+import { SearchAddon } from '@xterm/addon-search'
+import '@xterm/xterm/css/xterm.css'
 
 const NOTIFY_THRESHOLD_MS = 5000
+
+const SEARCH_DECORATIONS = {
+  matchBackground:               '#58a6ff2e',  // SearchAddon은 #RRGGBBAA 포맷 사용
+  matchBorder:                   '#58a6ff73',
+  matchOverviewRuler:            '#58a6ff',
+  activeMatchBackground:         '#58a6ff8c',
+  activeMatchBorder:             '#79c0ff',
+  activeMatchColorOverviewRuler: '#79c0ff',
+}
 
 // ANSI 이스케이프 코드 제거 (DB 저장 전 정제용)
 function stripAnsi(str) {
@@ -29,13 +39,60 @@ export default function TerminalView({ session, logId, active, visible, fontFami
   const logEnabledRef = useRef(logEnabled)
   logEnabledRef.current = logEnabled
   const logStateRef = useRef({
-    pendingCommand: '',   // 현재 입력 중인 명령어
-    lastCommand:    '',   // 직전 Enter로 실행된 명령어 (출력 수집 중)
-    output:         '',   // lastCommand 의 출력 버퍼
+    pendingCommand: '',
+    lastCommand:    '',
+    output:         '',
     mode:           'command',
     startTime:      Date.now(),
     inAltScreen:    false,
   })
+
+  // ── 검색 상태 ────────────────────────────────────────────────────────────────
+  const [showSearch, setShowSearch] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [matchInfo,  setMatchInfo]  = useState({ count: 0, index: -1 })
+
+  const searchAddonRef  = useRef(null)
+  const showSearchRef   = useRef(false)
+  showSearchRef.current = showSearch
+  const searchInputRef  = useRef(null)
+  const closeSearchRef  = useRef(null)
+
+  const closeSearch = useCallback(() => {
+    setShowSearch(false)
+    setSearchTerm('')
+    setMatchInfo({ count: 0, index: -1 })
+    searchAddonRef.current?.clearDecorations?.()
+    termRef.current?.focus()
+  }, [])
+  closeSearchRef.current = closeSearch
+
+  const doFind = useCallback((term, forward = true) => {
+    const sa = searchAddonRef.current
+    if (!sa || !term) return
+    const opts = { decorations: SEARCH_DECORATIONS }
+    if (forward) sa.findNext(term, opts)
+    else         sa.findPrevious(term, opts)
+  }, [])
+
+  // 검색창이 닫히면 하이라이트 제거
+  useEffect(() => {
+    if (!showSearch) {
+      searchAddonRef.current?.clearDecorations?.()
+    }
+  }, [showSearch])
+
+  // 검색어 변경 시 debounce 후 검색 (즉시 호출 시 5000줄 동기 스캔으로 UI 블록)
+  useEffect(() => {
+    if (!showSearch) return
+    if (!searchTerm) {
+      searchAddonRef.current?.clearDecorations?.()
+      setMatchInfo({ count: 0, index: -1 })
+      return
+    }
+    const t = setTimeout(() => doFind(searchTerm, true), 150)
+    return () => clearTimeout(t)
+  }, [searchTerm, showSearch, doFind])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -49,7 +106,6 @@ export default function TerminalView({ session, logId, active, visible, fontFami
       if (!containerRef.current) return
 
       // 폰트가 실제로 로드된 후 터미널을 초기화해야 xterm이 올바른 문자 폭을 측정함.
-      // 로컬 번들 폰트라 거의 즉시 완료됨.
       try {
         await document.fonts.load(`${fontSize ?? 14}px "${fontFamily}"`)
       } catch (_) { /* 폰트 확인 실패 시 그냥 진행 */ }
@@ -61,6 +117,7 @@ export default function TerminalView({ session, logId, active, visible, fontFami
       const api = window.electronAPI
 
       const term = new Terminal({
+        allowProposedApi: true,
         fontFamily: `"${fontFamily}", "D2Coding", "Nanum Gothic Coding", monospace`,
         fontSize: fontSize ?? 14,
         lineHeight: 1.45,
@@ -79,14 +136,23 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         },
       })
 
-      const fitAddon = new FitAddon()
+      const fitAddon    = new FitAddon()
+      const searchAddon = new SearchAddon()
       term.loadAddon(fitAddon)
       term.loadAddon(new WebLinksAddon())
+      term.loadAddon(searchAddon)
       term.open(containerRef.current)
-      termRef.current = term
-      fitRef.current  = fitAddon
+      termRef.current        = term
+      fitRef.current         = fitAddon
+      searchAddonRef.current = searchAddon
 
-      // 초기화 직후 컨테이너 크기에 맞게 fit (이걸 안 하면 기본 80×24로 고정됨)
+      // 검색 결과 개수 업데이트
+      searchAddon.onDidChangeResults?.((results) => {
+        if (results) setMatchInfo({ count: results.resultCount, index: results.resultIndex })
+        else         setMatchInfo({ count: 0, index: -1 })
+      })
+
+      // 초기화 직후 컨테이너 크기에 맞게 fit
       requestAnimationFrame(() => {
         if (!fitRef.current) return
         fitRef.current.fit()
@@ -96,12 +162,25 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         else if (session.type === 'ssh') api.sshResize(session.id, term.cols, term.rows)
       })
 
-      // ── 복사 / 붙여넣기 ───────────────────────────────────────────────────
+      // ── 복사 / 붙여넣기 / 검색 ────────────────────────────────────────────────
       term.attachCustomKeyEventHandler((e) => {
         if (e.type !== 'keydown') return true
 
+        // Ctrl+F → 터미널 내 검색 토글 (e.preventDefault 필수: native find-in-page 방지)
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.code === 'KeyF') {
+          e.preventDefault()
+          setShowSearch(v => !v)
+          return false
+        }
+
+        // Escape → 검색창 닫기
+        if (e.code === 'Escape' && showSearchRef.current) {
+          e.preventDefault()
+          closeSearchRef.current?.()
+          return false
+        }
+
         // Ctrl+Shift+F → 앱 레벨에서 로그 검색 패널을 열도록 전달
-        //   (return false = PTY에 전달하지 않되, 이벤트는 계속 버블링됨)
         if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyF') return false
 
         // Ctrl+V → 붙여넣기
@@ -137,9 +216,6 @@ export default function TerminalView({ session, logId, active, visible, fontFami
       })
 
       // ── 로그 캡처 헬퍼 ────────────────────────────────────────────────────
-      // lastCommand + 지금까지 쌓인 output을 DB에 저장하고 그 필드만 초기화.
-      // pendingCommand는 건드리지 않음 (다음 Enter까지 계속 쌓임).
-      // logId: 재시작 후에도 같은 세션 히스토리를 찾는 stable key (App.jsx에서 주입)
       const stableLogId = logId ?? session.id
 
       function flushLog(forcedMode) {
@@ -176,7 +252,6 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         if (!logEnabledRef.current || logStateRef.current.inAltScreen) return
 
         if (data === '\r') {
-          // Enter: 직전 lastCommand+output 저장 → 이번 pendingCommand를 lastCommand로 승격
           flushLog()
           const ls = logStateRef.current
           ls.lastCommand    = ls.pendingCommand
@@ -184,13 +259,11 @@ export default function TerminalView({ session, logId, active, visible, fontFami
           ls.output         = ''
           ls.startTime      = Date.now()
         } else if (data === '\x03') {
-          // Ctrl+C: 현재 lastCommand+output 저장 후 전부 초기화
           flushLog('stream')
           const ls = logStateRef.current
           ls.pendingCommand = ''
           ls.lastCommand    = ''
         } else if (data === '\x7f' || data === '\b') {
-          // Backspace
           logStateRef.current.pendingCommand = logStateRef.current.pendingCommand.slice(0, -1)
         } else if (data.length === 1 && data >= ' ') {
           logStateRef.current.pendingCommand += data
@@ -204,14 +277,11 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         if (e.data) sendInput(e.data)
       })
 
-      // termRef.current === term: 이 인스턴스가 여전히 살아있는지 확인
-      // PTY 출력에서 alternate screen + 출력 수집
       function handleOutputLog(data) {
         if (!logEnabledRef.current) return
         const ls = logStateRef.current
 
         if (data.includes('\x1b[?1049h')) {
-          // vim, htop 등 전체화면 앱 진입
           flushLog()
           ls.inAltScreen = true
           ls.mode        = 'app'
@@ -219,7 +289,6 @@ export default function TerminalView({ session, logId, active, visible, fontFami
           return
         }
         if (data.includes('\x1b[?1049l')) {
-          // 전체화면 앱 종료
           if (ls.inAltScreen) {
             api?.logAppend({
               sessionId: stableLogId, label: session.label || '',
@@ -256,9 +325,10 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         api.onLocalClose(session.id, onClose)
 
         doCleanup = () => {
-          flushLog()          // 탭 닫힐 때 미완성 레코드 저장
-          termRef.current = null
-          fitRef.current  = null
+          flushLog()
+          termRef.current        = null
+          fitRef.current         = null
+          searchAddonRef.current = null
           api.offLocalData(session.id, onData)
           api.offLocalClose(session.id, onClose)
           term.dispose()
@@ -288,9 +358,10 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         api.onSshClose(session.id, onClose)
 
         doCleanup = () => {
-          flushLog()          // 탭 닫힐 때 미완성 레코드 저장
-          termRef.current = null
-          fitRef.current  = null
+          flushLog()
+          termRef.current        = null
+          fitRef.current         = null
+          searchAddonRef.current = null
           api.offSshData(session.id, onData)
           api.offSshClose(session.id, onClose)
           term.dispose()
@@ -342,7 +413,7 @@ export default function TerminalView({ session, logId, active, visible, fontFami
     if (!term) return
     const apply = async () => {
       try { await document.fonts.load(`${fontSize ?? 14}px "${fontFamily}"`) } catch (_) {}
-      if (!termRef.current) return   // 언마운트 됐으면 중단
+      if (!termRef.current) return
       term.options.fontFamily = `"${fontFamily}", "D2Coding", "Nanum Gothic Coding", monospace`
       term.options.fontSize   = fontSize ?? 14
       requestAnimationFrame(() => {
@@ -379,10 +450,47 @@ export default function TerminalView({ session, logId, active, visible, fontFami
     return () => observer.disconnect()
   }, [active])
 
+  const isVisible = visible !== undefined ? visible : active
+
   return (
-    <div
-      ref={containerRef}
-      style={{ display: (visible !== undefined ? visible : active) ? 'block' : 'none', width: '100%', height: '100%', padding: '6px 8px' }}
-    />
+    <div style={{ position: 'relative', display: isVisible ? 'block' : 'none', width: '100%', height: '100%' }}>
+      <div ref={containerRef} style={{ width: '100%', height: '100%', padding: '6px 8px' }} />
+
+      {showSearch && (
+        <div className="term-search-bar" onMouseDown={e => e.stopPropagation()}>
+          <input
+            ref={searchInputRef}
+            autoFocus
+            className="term-search-input"
+            type="text"
+            placeholder="Find in terminal..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                e.shiftKey ? doFind(searchTerm, false) : doFind(searchTerm, true)
+              }
+              if (e.key === 'Escape') closeSearch()
+              // Ctrl+F도 닫기 (포커스가 input에 있을 때)
+              if (e.ctrlKey && !e.shiftKey && e.code === 'KeyF') {
+                e.preventDefault()
+                closeSearch()
+              }
+            }}
+          />
+          <span className="term-search-count">
+            {searchTerm
+              ? matchInfo.count === 0
+                ? 'No results'
+                : `${matchInfo.index + 1} / ${matchInfo.count}`
+              : ''}
+          </span>
+          <button className="term-search-btn" onClick={() => doFind(searchTerm, false)} title="Previous (Shift+Enter)">▲</button>
+          <button className="term-search-btn" onClick={() => doFind(searchTerm, true)}  title="Next (Enter)">▼</button>
+          <button className="term-search-btn" onClick={closeSearch}                     title="Close (Esc)">✕</button>
+        </div>
+      )}
+    </div>
   )
 }

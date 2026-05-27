@@ -917,3 +917,66 @@ body {
   flex-shrink: 0;
   margin: 0 2px;
 }
+
+/* ── 터미널 내 검색바 (Ctrl+F) ──────────────────────────────────────────── */
+.term-search-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 7px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.term-search-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 3px 8px;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.term-search-input:focus {
+  border-color: var(--accent);
+}
+.term-search-input::placeholder {
+  color: var(--fg-muted);
+}
+
+.term-search-count {
+  font-size: 12px;
+  color: var(--fg-muted);
+  min-width: 72px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.term-search-btn {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.12s, color 0.12s;
+}
+.term-search-btn:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+.term-search-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
