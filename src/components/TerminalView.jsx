@@ -336,28 +336,62 @@ export default function TerminalView({ session, logId, active, visible, fontFami
         }
 
       } else if (session.type === 'ssh') {
+        const MAX_RETRIES    = 5
+        const RETRY_DELAYS   = [2000, 4000, 8000, 16000, 30000]
+        let connectedOnce    = false
+        let retryCount       = 0
+        let retryTimer       = null
+
+        function sshConnect() {
+          api.sshConnect({
+            id: session.id, host: session.host, port: session.port,
+            username: session.username, password: session.password,
+            privateKey: session.privateKey, keyPath: session.keyPath,
+          }).then((res) => {
+            if (termRef.current !== term) return
+            if (res.ok) {
+              if (!connectedOnce) { onConnectedRef.current?.(); term.clear() }
+              connectedOnce = true
+              retryCount    = 0
+            }
+          }).catch((err) => {
+            if (termRef.current !== term) return
+            term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m`)
+            if (connectedOnce) scheduleRetry()
+          })
+        }
+
+        function scheduleRetry() {
+          if (retryCount >= MAX_RETRIES) {
+            term.writeln('\x1b[31m[reconnect failed — giving up]\x1b[0m\r\n')
+            return
+          }
+          const delay = RETRY_DELAYS[retryCount]
+          retryCount++
+          term.writeln(`\x1b[33m[reconnecting in ${delay / 1000}s... (${retryCount}/${MAX_RETRIES})]\x1b[0m`)
+          retryTimer = setTimeout(() => {
+            if (termRef.current !== term) return
+            sshConnect()
+          }, delay)
+        }
+
         term.writeln('\x1b[33mConnecting...\x1b[0m')
-        api.sshConnect({
-          id: session.id, host: session.host, port: session.port,
-          username: session.username, password: session.password,
-          privateKey: session.privateKey, keyPath: session.keyPath,
-        }).then((res) => {
-          if (termRef.current !== term) return
-          if (res.ok) { onConnectedRef.current?.(); term.clear() }
-        }).catch((err) => {
-          if (termRef.current !== term) return
-          term.writeln(`\r\n\x1b[31m[connection failed] ${err}\x1b[0m\r\n`)
-        })
+        sshConnect()
 
         const onData  = (data) => {
           if (termRef.current !== term) return
           term.write(data); checkNotify(data); handleOutputLog(data)
         }
-        const onClose = ()     => { if (termRef.current === term) term.writeln('\r\n\x1b[33m[disconnected]\x1b[0m') }
+        const onClose = () => {
+          if (termRef.current !== term) return
+          term.writeln('\r\n\x1b[33m[disconnected]\x1b[0m')
+          scheduleRetry()
+        }
         api.onSshData(session.id, onData)
         api.onSshClose(session.id, onClose)
 
         doCleanup = () => {
+          clearTimeout(retryTimer)
           flushLog()
           termRef.current        = null
           fitRef.current         = null

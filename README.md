@@ -21,10 +21,18 @@ Like an airport lounge — where agents wait, connections stay warm, and work be
 - Password, private key, and key file path authentication
 - Automatic `keyboard-interactive` handling (Ubuntu, Debian, etc.)
 - Save and instantly reconnect to any server
+- **Auto-reconnect** — automatically retries on disconnect (up to 5 attempts, exponential backoff)
 
-### Local Terminal
-- Set a start directory per profile (one terminal per project)
-- Folder browse dialog for quick path selection
+### Terminal
+- Split panes — unlimited horizontal/vertical splits per tab (Ctrl+Shift+H / V / W)
+- **In-pane search** — `Ctrl+F` to search terminal output with match highlighting
+- Set a start directory per local profile (one terminal per project)
+- Font family and size settings (10 built-in fonts + custom)
+
+### Log Capture
+- Per-session command + output logging, stored in SQLite
+- **Log search** — `Ctrl+Shift+F` full-text search across all sessions (FTS5)
+- Configurable retention period with one-click purge
 
 ### Quality of Life
 - `Ctrl+C` — copies selected text; sends SIGINT when nothing is selected
