@@ -184,8 +184,9 @@ body {
 }
 .tab-checkin-tags {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px;
+  overflow: hidden;
 }
 .tab-checkin-tag {
   font-size: 9px;
@@ -197,11 +198,18 @@ body {
   padding: 1px 4px;
   line-height: 1.4;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .tab-checkin-tag--svc {
   color: var(--green);
   background: rgba(63,185,80,0.08);
   border-color: rgba(63,185,80,0.25);
+}
+.tab-checkin-tag--more {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+  padding-left: 2px;
 }
 
 .tab-dot {

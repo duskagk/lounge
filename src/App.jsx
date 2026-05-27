@@ -468,16 +468,22 @@ function App() {
                   {isExpanded && ci && (
                     <div className="tab-checkin">
                       <div className="tab-checkin-os">{ci.os}{ci.arch ? ` · ${ci.arch}` : ''}</div>
-                      {(ci.tools.length > 0 || ci.services.length > 0) && (
-                        <div className="tab-checkin-tags">
-                          {ci.services.slice(0, 3).map(t => (
-                            <span key={t} className="tab-checkin-tag tab-checkin-tag--svc">{t}</span>
-                          ))}
-                          {ci.tools.slice(0, 4).map(t => (
-                            <span key={t} className="tab-checkin-tag">{t}</span>
-                          ))}
-                        </div>
-                      )}
+                      {(ci.tools.length > 0 || ci.services.length > 0) && (() => {
+                        const all = [
+                          ...ci.services.map(n => ({ n, svc: true })),
+                          ...ci.tools.map(n => ({ n, svc: false })),
+                        ]
+                        const shown = all.slice(0, 5)
+                        const extra = all.length - 5
+                        return (
+                          <div className="tab-checkin-tags">
+                            {shown.map(t => (
+                              <span key={t.n} className={`tab-checkin-tag${t.svc ? ' tab-checkin-tag--svc' : ''}`}>{t.n}</span>
+                            ))}
+                            {extra > 0 && <span className="tab-checkin-tag tab-checkin-tag--more">+{extra}</span>}
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>

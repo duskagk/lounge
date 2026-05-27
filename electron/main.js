@@ -236,15 +236,20 @@ ipcMain.on('ssh:disconnect', (_, { id }) => {
   }
 })
 
+// Linux: /etc/os-release → macOS: sw_vers → fallback: uname
+// CPU:  nproc (Linux) → sysctl hw.logicalcpu (macOS/BSD)
+// MEM:  free (Linux)  → sysctl hw.memsize bytes → GiB (macOS)
+// Services: systemctl (Linux) + brew services (macOS)
 const CHECKIN_CMD = [
-  'OS=$(grep -m1 PRETTY_NAME /etc/os-release 2>/dev/null | sed \'s/PRETTY_NAME=//;s/"//g\' || uname -s)',
+  'if [ -f /etc/os-release ]; then OS=$(grep -m1 PRETTY_NAME /etc/os-release | sed \'s/PRETTY_NAME=//;s/"//g\'); elif command -v sw_vers >/dev/null 2>&1; then OS="$(sw_vers -productName) $(sw_vers -productVersion)"; else OS=$(uname -s); fi',
   'ARCH=$(uname -m)',
-  'CPU=$(nproc 2>/dev/null || echo ?)',
-  'MEM=$(free -h 2>/dev/null | awk \'/^Mem/{print $2}\' || echo ?)',
+  'CPU=$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo ?)',
+  'MEM=$(free -h 2>/dev/null | awk \'/^Mem/{print $2}\' || sysctl -n hw.memsize 2>/dev/null | awk \'{printf "%.0fGi",$1/1073741824}\' || echo ?)',
   'DISK=$(df -h / 2>/dev/null | awk \'NR>1{print $2; exit}\')',
   'printf "OS:%s\\nARCH:%s\\nCPU:%s\\nMEM:%s\\nDISK:%s\\n" "$OS" "$ARCH" "$CPU" "$MEM" "$DISK"',
-  'for t in git docker kubectl helm node python3 go java nginx mysql postgres redis; do which $t >/dev/null 2>&1 && echo "TOOL:$t"; done',
+  'for t in git docker kubectl helm node python3 go java nginx mysql postgres redis brew; do command -v $t >/dev/null 2>&1 && echo "TOOL:$t"; done',
   'for svc in nginx apache2 mysql postgresql redis-server redis mongod docker; do systemctl is-active $svc 2>/dev/null | grep -q active && echo "SVC:$svc"; done',
+  'command -v brew >/dev/null 2>&1 && brew services list 2>/dev/null | awk \'NR>1 && $2=="started" && /nginx|mysql|postgres|redis|mongo|docker/{print "SVC:"$1}\'',
 ].join('; ')
 
 ipcMain.handle('ssh:checkin', (_, { id }) => {
